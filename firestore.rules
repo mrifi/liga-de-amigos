@@ -1,0 +1,33 @@
+rules_version = '2';
+// Liga de Amigos: cada liga vive en ligas/{código}. Solo sus miembros pueden leer y escribir dentro.
+// Para entrar hace falta conocer el código (no se pueden listar las ligas).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMember(code) {
+      return signedIn() && exists(/databases/$(database)/documents/ligas/$(code)/miembros/$(request.auth.uid));
+    }
+
+    match /usuarios/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /ligas/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn() && request.resource.data.owner == request.auth.uid;
+      allow update: if signedIn() && resource.data.owner == request.auth.uid;
+
+      // unirse: cualquiera con sesión que conozca el código crea su propia ficha de miembro
+      match /miembros/{uid} {
+        allow get: if signedIn();
+        allow create, update: if signedIn() && request.auth.uid == uid;
+        allow list, delete: if isMember(code);
+      }
+
+      // todo lo demás de la liga (equipos, jornadas, copa, mercado…)
+      match /{coll}/{rest=**} {
+        allow read, write: if isMember(code);
+      }
+    }
+  }
+}
