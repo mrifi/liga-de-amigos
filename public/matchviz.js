@@ -690,7 +690,9 @@
     const h = { shirt: H.colors[0], trim: H.colors[1] }; let a = { shirt: A.colors[0], trim: A.colors[1] };
     if (colorDist(h.shirt, a.shirt) < 120) a = { shirt: A.colors[1], trim: A.colors[0] };
     if (colorDist(h.shirt, a.shirt) < 120) a = { shirt: colorDist(h.shirt, '#ffffff') > 200 ? '#f2f2f2' : '#1b1b1b', trim: colorDist(h.shirt, '#ffffff') > 200 ? '#222222' : '#ffffff' };
-    const gk = [colorDist(h.shirt, '#facc15') < 140 || colorDist(a.shirt, '#facc15') < 140 ? '#f97316' : '#facc15', colorDist(h.shirt, '#22d3ee') < 140 || colorDist(a.shirt, '#22d3ee') < 140 ? '#a3e635' : '#22d3ee'];
+    // porteros: el color de la paleta más distinto de las dos camisetas (y del otro portero)
+    const PAL = ['#facc15', '#22d3ee', '#a3e635', '#f97316', '#e879f9', '#f43f5e', '#111111', '#ffffff'], far = avoid => PAL.map(c => [c, Math.min(...avoid.map(x => colorDist(c, x)))]).sort((p, q) => q[1] - p[1])[0][0];
+    const g0 = far([h.shirt, a.shirt, h.trim, a.trim]), gk = [g0, far([h.shirt, a.shirt, g0])];
     return [h, a].map((k, i) => ({ ...k, gk: gk[i], gkTrim: '#111111', num: colorDist(k.shirt, '#ffffff') > 230 ? '#ffffff' : '#111111' }));
   }
 
@@ -913,6 +915,7 @@
     function dropMan(id) { const mm = men[id]; if (!mm) return; for (const k2 of ['torso', 'shorts', 'head', 'hair']) IM[k2].setMatrixAt(mm.slot, ZERO); for (const i of [0, 1]) { IM.leg.setMatrixAt(mm.slot * 2 + i, ZERO); IM.arm.setMatrixAt(mm.slot * 2 + i, ZERO); } blob.setMatrixAt(mm.slot, ZERO); scene.remove(mm.nm); mm.nm.material.dispose(); free.push(mm.slot); delete men[id]; }
     // muñecos animados (GLB con esqueleto): un clon por jugador y transición suave entre animaciones
     const rmen = {}, V3 = new T.Vector3(), kitMats = {};
+    try { window.__rmen = rmen; } catch (e) {}
     function kitMat(src, color, key) {
       const k = key + src.uuid; if (kitMats[k]) return kitMats[k];
       const m = src.clone(); const c = new T.Color(color).convertSRGBToLinear();
