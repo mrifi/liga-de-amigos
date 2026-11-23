@@ -781,7 +781,7 @@
       try { const [url, name] = [].concat(mf.clips[key]); const g = await load(url); const c = name ? T.AnimationClip.findByName(g.animations, name) : g.animations[0]; if (c) clips[key] = c; } catch (e) { console.warn('clip', key, e); }
     }
     if (!clips.run && !clips.idle) throw new Error('sin animaciones');
-    return { scene: base.scene, clips, scale: (mf.height || 1.85) * 1.25 / h, yaw: mf.yaw != null ? mf.yaw : Math.PI / 2, tint: mf.tint !== false };
+    return { scene: base.scene, clips, scale: (mf.height || 1.85) * 1.25 / h, yaw: mf.yaw != null ? mf.yaw : Math.PI / 2, tint: mf.tint !== false, kit: !!mf.kit, sock: mf.sock || null };
   }
   const coarse = () => { try { return matchMedia('(pointer: coarse)').matches; } catch (e) { return false; } };
   async function R3D(root, tl, kit, meta) {
@@ -919,15 +919,35 @@
       if (rig.tint) { m.onBeforeCompile = sh => { sh.uniforms.kitColor = { value: c }; sh.fragmentShader = 'uniform vec3 kitColor;\n' + sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\nfloat kl = dot(diffuseColor.rgb, vec3(.299,.587,.114)); float ks = max(max(diffuseColor.r,diffuseColor.g),diffuseColor.b) - min(min(diffuseColor.r,diffuseColor.g),diffuseColor.b); float kk = smoothstep(.5,.72,kl) * (1.0 - smoothstep(.07,.18,ks)); diffuseColor.rgb = mix(diffuseColor.rgb, kitColor * (.3 + .72 * kl), kk);'); }; m.customProgramCacheKey = () => 'kit' + color; }
       return kitMats[k] = m;
     }
+    // modelo por piezas (camiseta, pantalón, medias, botas): cada pieza toma el color de la equipación
+    const HAIRS = ['#1d140c', '#3b2414', '#0d0d0d', '#6b4a2b', '#2a1a10'];
+    function partMat(src, o) {
+      const k = kit[o.s], gk = o.pos === 'POR', shirt = gk ? k.gk : k.shirt, trim = gk ? k.gkTrim : k.trim, h = E.hash(o.id) >>> 3, skin = skins[h % skins.length], hair = HAIRS[(h >>> 4) % HAIRS.length];
+      const n = src.name, col = { kit_shirt: shirt, kit_shorts: trim, kit_trim: shirt, boots: '#141414', sole: '#e9e9e9', skin, skin_dark: skin, leg_skin: skin, hair }[n];
+      if (!col) return src;
+      const key = n + '|' + col + (n === 'leg_skin' ? '|' + shirt : ''); if (kitMats[key]) return kitMats[key];
+      const m = src.clone(); m.color = new T.Color(col).convertSRGBToLinear(); if (n === 'skin_dark') m.color.multiplyScalar(.82);
+      if (n === 'leg_skin' && rig.sock) {
+        // medias: la parte baja de la pierna (en la postura de reposo) se pinta del color de la camiseta
+        const sc = new T.Color(shirt).convertSRGBToLinear(), top = rig.sock;
+        m.onBeforeCompile = sh => {
+          sh.uniforms.sockC = { value: sc }; sh.uniforms.sockTop = { value: top };
+          sh.vertexShader = 'varying float vRestY;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvRestY = position.y;');
+          sh.fragmentShader = 'uniform vec3 sockC; uniform float sockTop; varying float vRestY;\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\nif (vRestY < sockTop) diffuseColor.rgb = sockC;');
+        };
+        m.customProgramCacheKey = () => 'sock' + top;
+      }
+      return kitMats[key] = m;
+    }
     function makeRigMan(o) {
       const k = kit[o.s], color = o.pos === 'POR' ? k.gk : k.shirt;
       const g = T.SkeletonUtils.clone(rig.scene); g.scale.setScalar(rig.scale);
-      g.traverse(x => { if (x.isMesh) { x.castShadow = true; x.frustumCulled = false; x.material = Array.isArray(x.material) ? x.material.map(mm => kitMat(mm, color, o.s + o.pos)) : kitMat(x.material, color, o.s + (o.pos === 'POR' ? 'g' : 'p')); } });
+      g.traverse(x => { if (x.isMesh) { x.castShadow = true; x.frustumCulled = false; x.material = rig.kit ? (Array.isArray(x.material) ? x.material.map(mm => partMat(mm, o)) : partMat(x.material, o)) : Array.isArray(x.material) ? x.material.map(mm => kitMat(mm, color, o.s + o.pos)) : kitMat(x.material, color, o.s + (o.pos === 'POR' ? 'g' : 'p')); } });
       const mixer = new T.AnimationMixer(g), acts = {};
-      for (const name in rig.clips) { const a = mixer.clipAction(rig.clips[name]); if (['kick', 'slide'].includes(name)) { a.setLoop(T.LoopOnce, 1); a.clampWhenFinished = true; } acts[name] = a; }
+      for (const name in rig.clips) { const a = mixer.clipAction(rig.clips[name]); if (['kick', 'slide', 'fall'].includes(name)) { a.setLoop(T.LoopOnce, 1); a.clampWhenFinished = true; } acts[name] = a; }
       const first = acts.idle || acts.run; if (first) first.play();
       // pies: altura del tobillo en reposo para pegarlos al césped en cada fotograma
-      const feet = ['LeftFoot', 'RightFoot', 'LeftToeBase', 'RightToeBase'].map(n => g.getObjectByName(n)).filter(Boolean);
+      const feet = ['LeftFoot', 'RightFoot', 'LeftToeBase', 'RightToeBase', 'FootL', 'FootR', 'PTL', 'PTR'].map(n => g.getObjectByName(n)).filter(Boolean);
       scene.add(g); g.updateMatrixWorld(true);
       let rest = 0; if (feet.length) { rest = 1e9; for (const f of feet) { V3.setFromMatrixPosition(f.matrixWorld); rest = Math.min(rest, V3.y); } rest = clamp(rest, 0, .3); }
       return { g, mixer, acts, feet, rest, lift: 0, cur: first ? (acts.idle ? 'idle' : 'run') : null };
@@ -936,8 +956,8 @@
       const seen = new Set();
       for (const o of pls) {
         seen.add(o.id); let mm = rmen[o.id]; if (!mm) mm = rmen[o.id] = makeRigMan(o);
-        const [wx, wz] = W3(o.x, o.y); mm.g.position.set(wx, 0, wz); mm.g.rotation.set(o.down && !mm.acts.slide ? -Math.PI / 2 * .9 : 0, -o.face + rig.yaw, 0);
-        let want = o.act === 'slide' && mm.acts.slide ? 'slide' : o.act === 'kick' && mm.acts.kick ? 'kick' : o.act === 'cheer' && mm.acts.cheer ? 'cheer' : o.sp > 1.2 || !mm.acts.idle ? 'run' : 'idle';
+        const [wx, wz] = W3(o.x, o.y); mm.g.position.set(wx, 0, wz); mm.g.rotation.set(o.down && !mm.acts.slide && !mm.acts.fall ? -Math.PI / 2 * .9 : 0, -o.face + rig.yaw, 0);
+        let want = o.down && mm.acts.fall ? 'fall' : o.act === 'slide' && mm.acts.slide ? 'slide' : o.act === 'kick' && mm.acts.kick ? 'kick' : o.act === 'cheer' && mm.acts.cheer ? 'cheer' : o.sp > 1.2 || !mm.acts.idle ? 'run' : 'idle';
         if (!mm.acts[want]) want = mm.acts.run ? 'run' : mm.cur;
         if (want && want !== mm.cur) { const nx = mm.acts[want], pv = mm.acts[mm.cur]; nx.reset().fadeIn(.18).play(); if (pv) pv.fadeOut(.18); mm.cur = want; }
         if (mm.cur === 'run' && mm.acts.run) mm.acts.run.timeScale = clamp(o.sp / 6.5, .55, 1.6);
