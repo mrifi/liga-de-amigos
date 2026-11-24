@@ -932,7 +932,7 @@ function webPanel() {
 const TG_BOT = 'LigaDeAmigosRifiBot';
 function tgPanel() {
   const w = WEB(); if (!w) return '';
-  return `<section class="panel"><h3>Avisos por Telegram</h3><p class="small mute">El bot avisa 10 minutos antes de cada partido (liga, copa y Champions), manda los resultados con goleadores y la clasificación, las ofertas por vuestros jugadores y lo que escribáis en el muro.</p>
+  return `<section class="panel"><h3>Avisos por Telegram</h3><p class="small mute">El bot avisa 10 minutos antes de cada partido (liga, copa y Champions), manda los resultados con goleadores y la clasificación, las ofertas por vuestros jugadores y lo que escribáis en el muro. Y pica: comenta cada jornada, hace la previa de los derbis y trae noticias cada mañana.</p>
   <ol class="small" style="margin:8px 0 10px 18px;line-height:1.6"><li>Crea un grupo de Telegram con tus amigos (o usa uno que ya tengáis).</li><li>Añade a <b>@${TG_BOT}</b> al grupo.</li><li>En el grupo escribe: <code>/vincular ${esc(w.code)}</code></li></ol>
   <div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn y" href="https://t.me/${TG_BOT}?startgroup=liga" target="_blank" rel="noopener">Añadir el bot a un grupo</a><button class="btn ghost" data-act="tgcopy">Copiar /vincular ${esc(w.code)}</button></div></section>`;
 }

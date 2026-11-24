@@ -58,11 +58,12 @@ const dec = d => { if (!d) return d; const o = {}; for (const k in d) { const v 
 const L = {}; // code -> { cfg, teams, jor, cup, cl, chat, unsub[] , ready }
 function watch(code) {
   if (L[code]) return;
-  const lg = L[code] = { code, cfg: null, teams: {}, jor: {}, cup: {}, cl: {}, unsub: [], boot: Date.now() };
+  const lg = L[code] = { code, cfg: null, teams: {}, jor: {}, cup: {}, cl: {}, mem: {}, unsub: [], boot: Date.now() };
   const P = 'ligas/' + code + '/';
   const col = (name, fn) => lg.unsub.push(onSnapshot(collection(db, P + name), q => fn(q), e => console.warn(code, name, e.code)));
   lg.unsub.push(onSnapshot(doc(db, P + 'liga/config'), s => { lg.cfg = s.exists() ? dec(s.data()) : null; }, e => console.warn(code, 'cfg', e.code)));
-  col('equipos', q => q.docs.forEach(d => { lg.teams[d.id] = dec(d.data()); }));
+  col('equipos', q => { q.docs.forEach(d => { lg.teams[d.id] = dec(d.data()); }); ledgerNews(lg); });
+  col('miembros', q => q.docs.forEach(d => { lg.mem[d.id] = d.data(); }));
   const store = (k, name) => col(name, q => {
     q.docs.forEach(d => { lg[k][d.id] = dec(d.data()); });
     q.docChanges().forEach(ch => { const d = lg[k][ch.doc.id]; if (d && d.fin) onFinal(lg, k, ch.doc.id, d); });
@@ -73,6 +74,11 @@ function watch(code) {
     once(code + ':muro:' + ch.doc.id, () => send(chatOf(code), `💬 <b>${esc(teamName(lg, p.team) || 'Míster')}</b>: ${esc(String(p.txt || '').slice(0, 300))}`));
   }));
   col('ofertas', q => q.docChanges().forEach(ch => {
+    if (ch.type === 'modified') {
+      const o = dec(ch.doc.data()); if (!o || o.status !== 'no' || o.ai) return;
+      const fi = lg.teams[o.from]?.idx, ti = lg.teams[o.to]?.idx; if (fi == null || ti == null || !isHuman(lg, fi) || !isHuman(lg, ti)) return;
+      return once(code + ':ofno:' + ch.doc.id, () => send(chatOf(code), fill(pick(T.REJECT), { t: who(lg, ti), f: who(lg, fi), p: esc(E.player(o.pid).name), x: fmtM(o.price) })));
+    }
     if (ch.type !== 'added') return; const o = dec(ch.doc.data()); if (!o || o.status !== 'pend' || !o.t || o.t < lg.boot - 60000) return;
     const to = lg.teams[o.to]; if (!to || !to.owner) return;
     const from = lg.teams[o.from], pl = E.player(o.pid);
@@ -126,7 +132,9 @@ function tick() {
         send(chat, `${label[ev.k]} <b>${esc(ev.name)}</b> a las ${hhmm(ev.at)} (en 10 min)\n${ps.join('\n')}${ps.length ? '\n' : ''}\nVedlo en directo: quien esté conectado juega con <b>+8% de posesión</b>.\n${SITE}`);
       });
       if (dt <= 0 && dt > -90000) once(code + ':ko:' + ev.k + ev.id, () => send(chat, `🔴 ¡Empieza ${esc(ev.name)}! ${SITE}`));
+      if (ev.k === 'jor' && dt <= 3 * 3600000 && dt > 20 * 60000) { const pv = previa(lg, ev); if (pv) once(code + ':pv:' + ev.id, () => send(chat, pv)); }
     }
+    const [dk, hr] = madrid(now); if (hr >= 10 && hr < 12) once(code + ':dig:' + dk, () => send(chat, digest(lg)));
   }
 }
 
@@ -145,12 +153,189 @@ function onFinal(lg, k, id, d) {
     });
     let txt = `${title}\n\n${lines.join('\n')}`;
     if (k === 'jor') {
-      const docs = Object.values(lg.jor).filter(x => x.season === lg.cfg.season && x.fin);
-      const tb = E.table(lg.cfg.n, docs);
+      const tb = E.table(lg.cfg.n, seasonDocs(lg, d.md));
       txt += '\n\n<b>Clasificación</b>\n' + tb.map((r, i) => `${i + 1}. ${isHuman(lg, r.t) ? '<b>' : ''}${esc(idxName(lg, r.t))} · ${r.pts}${isHuman(lg, r.t) ? '</b>' : ''}`).filter((_, i, a) => i < 5 || isHuman(lg, tb[i].t)).join('\n');
     }
     send(chat, txt);
+    setTimeout(() => { const b = pique(lg, k, d); if (b.length) send(chat, '🎙️ <b>El vestuario opina</b>\n\n' + b.join('\n\n')); }, 15000);
   });
+}
+
+
+/* ---------- piques y noticias ---------- */
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const fill = (s, o) => s.replace(/\{(\w+)\}/g, (_, k) => o[k] ?? '');
+const madrid = t => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false }).formatToParts(t).map(x => [x.type, x.value])); return [`${p.year}-${p.month}-${p.day}`, +p.hour % 24]; };
+const mgr = (lg, i) => { const t = teamsArr(lg)[i], n = t && t.owner && lg.mem[t.owner]?.name; return n ? String(n).split(/[\s@]/)[0] : null; };
+const who = (lg, i) => { const m = mgr(lg, i); return `<b>${esc(idxName(lg, i))}</b>${m ? ' (' + esc(m) + ')' : ''}`; };
+const nick = (lg, i) => esc(mgr(lg, i) || idxName(lg, i));
+const humansIdx = lg => teamsArr(lg).map((t, i) => i).filter(i => isHuman(lg, i));
+const seasonDocs = (lg, maxMd = 1e9) => Object.values(lg.jor).filter(x => x.season === lg.cfg.season && x.fin && x.m && x.md <= maxMd).sort((a, b) => a.md - b.md);
+const tableOf = (lg, docs) => { const tb = E.table(lg.cfg.n, docs), pos = {}; tb.forEach((r, k) => { pos[r.t] = k + 1; }); return { tb, pos, row: i => tb.find(r => r.t === i) }; };
+const streak = (form, ch) => { let k = 0; for (let i = form.length - 1; i >= 0 && form[i] === ch; i--) k++; return k; };
+const surname = id => E.player(id).name.split(' ').slice(-1)[0];
+
+const T = {
+  DERBY_WIN: [
+    '🔥 {w} se lleva el derbi {sc}. {lm}, el grupo es todo tuyo para las excusas.',
+    '😎 Derbi para {w} ({sc}). {lm} ya está buscando al árbitro para echarle la culpa.',
+    '🏆 {w} gana el derbi {sc}. Tranquilo {lm}, solo te lo vamos a recordar toda la semana.',
+    '📢 ¡{w} {sc} {l}! Que alguien le pase un pañuelo a {lm}.',
+    '🥊 {w} tumba a {l} ({sc}). {wm} ya puede ir sacando pecho en el grupo.'],
+  DERBY_HUMIL: [
+    '💀 {sc}. Eso no ha sido un derbi, ha sido un atraco. {lm}, ¿quieres que te expliquemos cómo va el juego?',
+    '📉 {lm} ha recibido una clase magistral gratis. Los demás tomamos apuntes.',
+    '🚑 Que alguien llame a una ambulancia para la defensa de {l}.'],
+  DERBY_DRAW: [
+    '🤝 Empate en el derbi entre {a} y {b} ({sc}). Ninguno presume… de momento.',
+    '😐 {a} y {b} firman tablas ({sc}). Tanto hablar en el grupo para esto.',
+    '🫱 {sc} entre {a} y {b}. Se reparten los puntos y las excusas.'],
+  LOST_AI: [
+    '🤖 {l} pierde {sc} contra la IA. Contra una máquina, {lm}. Contra una máquina.',
+    '🙈 {l} cae ante {ai} ({sc}). La IA ni sabe que existes y aun así te ha ganado.',
+    '🤖 {ai} le da un repaso a {l} ({sc}). Skynet empieza por aquí.',
+    '🫠 {lm}, perder {sc} contra {ai}… ¿has puesto la alineación con los ojos cerrados?'],
+  DRAW_AI: [
+    '😴 {t} empata contra {ai} ({sc}). Ni frío ni calor, {tm}.'],
+  BIG_WIN: [
+    '🚀 {w} le endosa un {sc} a {ai}. {wm} está en modo Guardiola.',
+    '💥 {w} pasa por encima de {ai} ({sc}). Avisados quedáis.',
+    '🎯 {sc} de {w} a {ai}. Esto empieza a dar miedo, chavales.'],
+  HAT: ['🎩 Hat-trick de {p} con {t}. Que se lleve el balón a casa.', '🎩 {p} mete tres con {t}. Alguien que le haga un contrato de por vida.'],
+  RED: ['🟥 Roja para {p}, de {t}. Disciplina de patio de colegio.', '🟥 {p} se va a la calle antes de tiempo. {tm}, las duchas le esperaban.'],
+  NEW_KING: ['👑 {w} es el nuevo rey del grupo. Arrodillaos.', '👑 Cambio de trono: {w} ya manda entre los amigos. {pm}, se te acabó el chollo.'],
+  LEADER: ['👑 {w} sigue mandando entre los amigos; {s} a {g} pts. Se huele el miedo.', '📊 {w} lidera el grupo y {s} persigue a {g} puntos… con la lengua fuera.'],
+  TIED: ['⚖️ {a} y {b} empatados a puntos. Esto se pone caliente.'],
+  OVERTAKE: ['⬆️ {a} adelanta a {b} en la tabla. {bm}, eso escuece.', '🏎️ Adelantamiento: {a} pasa a {b}. Se oye llorar desde aquí.'],
+  LAST: ['🏮 {l} es el farolillo rojo de la liga. Por algo se empieza…', '🏮 Último de la tabla: {l}. {lm}, que alguien te mire el Wi-Fi porque el equipo no conecta.'],
+  LOSE_STREAK: ['📉 {t} lleva {k} derrotas seguidas. ¿Se puede despedir al mánager? Ah, que eres tú, {tm}.', '😬 {k} derrotas seguidas para {t}. Huele a crisis en el vestuario.'],
+  WIN_STREAK: ['🔥 {t} encadena {k} victorias seguidas. ¿Alguien piensa pararle?', '📈 {k} de {k} para {t}. {tm} ya se cree Ancelotti.'],
+  PREV: ['🍻 El que pierda paga las cañas. Lo dice el bot y no se discute.', '📣 Se aceptan apuestas en el grupo. Quien calle, otorga.', '🧤 Mucho audio de WhatsApp, pero esto se decide en el campo.', '👀 Conectaos al directo: el que lo vea tiene +8% de posesión. El que no, que no llore luego.'],
+  REJECT: ['❌ {t} rechaza los {x} de {f} por {p}. ¿Tacaño o visionario?', '🙅 {f} ofrece {x} por {p} y {t} dice que nanai.'],
+  BUY: ['📰 <b>FICHAJE</b> · {t} se hace con {p} por {x}.'],
+  BUY_BIG: [' Talonario sin fondo.', ' ¿Seguro que eso no es un error de un cero?', ' El mercado tiembla.'],
+  AUC: ['🔨 {t} gana la subasta de {p} por {x}.'],
+  SELL: ['💼 {t} vende a {p} por {x}.'],
+  REL: ['🗑️ {t} libera a {p}. Gracias por los servicios prestados (pocos).'],
+  BUILD: ['🏗️ {t} empieza obras: {x}. Ladrillo y ambición.'],
+  CLOSE: ['{lm}, ¿todo bien en casa?', 'Recordad: el que va último invita.', '{wm} está insoportable. Alguien tiene que pararle.', 'Hoy se puede cambiar todo. O no.']
+};
+
+function scoreOf(m, pens) { const sc = `${m.hg}-${m.ag}`; return pens ? `${sc} (pen. ${pens[0]}-${pens[1]})` : sc; }
+function winnerOf(m, pens) { if (m.hg !== m.ag) return m.hg > m.ag ? 0 : 1; if (pens) return pens[0] > pens[1] ? 0 : 1; return -1; }
+
+function pique(lg, k, d) {
+  const out = [], hum = new Set(humansIdx(lg)); if (!hum.size) return out;
+  d.m.forEach((m, i) => {
+    const pens = d.pens && d.pens[i], hH = hum.has(m.h), hA = hum.has(m.a), sc = scoreOf(m, pens), w = winnerOf(m, pens), diff = Math.abs(m.hg - m.ag);
+    if (hH && hA) {
+      if (w < 0) out.push(fill(pick(T.DERBY_DRAW), { a: who(lg, m.h), b: who(lg, m.a), sc }));
+      else { const W = w ? m.a : m.h, Lo = w ? m.h : m.a, o = { w: who(lg, W), l: who(lg, Lo), wm: nick(lg, W), lm: nick(lg, Lo), sc };
+        out.push(fill(pick(T.DERBY_WIN), o)); if (diff >= 3) out.push(fill(pick(T.DERBY_HUMIL), o)); }
+    } else if (hH || hA) {
+      const me = hH ? m.h : m.a, ai = hH ? m.a : m.h, mine = hH ? 0 : 1;
+      if (w >= 0 && w !== mine) out.push(fill(pick(T.LOST_AI), { l: who(lg, me), lm: nick(lg, me), ai: esc(idxName(lg, ai, d)), sc }));
+      else if (w === mine && diff >= 3) out.push(fill(pick(T.BIG_WIN), { w: who(lg, me), wm: nick(lg, me), ai: esc(idxName(lg, ai, d)), sc }));
+      else if (w < 0 && Math.random() < .4) out.push(fill(pick(T.DRAW_AI), { t: who(lg, me), tm: nick(lg, me), ai: esc(idxName(lg, ai, d)), sc }));
+    }
+    const g = {};
+    for (const e of m.ev || []) {
+      const ti = e.s ? m.a : m.h; if (!hum.has(ti)) continue;
+      if (e.t === 'gol') { g[e.p] = (g[e.p] || 0) + 1; if (g[e.p] === 3) out.push(fill(pick(T.HAT), { p: esc(E.player(e.p).name), t: who(lg, ti) })); }
+      if (e.t === 'roja') out.push(fill(pick(T.RED), { p: esc(E.player(e.p).name), t: who(lg, ti), tm: nick(lg, ti) }));
+    }
+  });
+  if (k === 'jor') {
+    const before = tableOf(lg, seasonDocs(lg, d.md - 1)), after = tableOf(lg, seasonDocs(lg, d.md)), H = [...hum];
+    if (H.length >= 2) {
+      const rank = P => [...H].sort((a, b) => P.pos[a] - P.pos[b]);
+      const ra = rank(after), rb = rank(before), lead = ra[0], sec = ra[1], g = after.row(lead).pts - after.row(sec).pts;
+      if (d.md > 1 && rb[0] !== lead) out.push(fill(pick(T.NEW_KING), { w: who(lg, lead), pm: nick(lg, rb[0]) }));
+      else if (g === 0) out.push(fill(pick(T.TIED), { a: who(lg, lead), b: who(lg, sec) }));
+      else out.push(fill(pick(T.LEADER), { w: who(lg, lead), s: who(lg, sec), g }));
+      if (d.md > 1) for (const a of H) for (const b of H) if (a !== b && before.pos[a] > before.pos[b] && after.pos[a] < after.pos[b] && !(a === lead && rb[0] === b)) out.push(fill(pick(T.OVERTAKE), { a: who(lg, a), b: who(lg, b), bm: nick(lg, b) }));
+    }
+    const last = after.tb[after.tb.length - 1]; if (last && hum.has(last.t) && d.md > 1) out.push(fill(pick(T.LAST), { l: who(lg, last.t), lm: nick(lg, last.t) }));
+    for (const i of H) { const f = after.row(i).form, ls = streak(f, 'P'), ws = streak(f, 'G');
+      if (ls >= 3) out.push(fill(pick(T.LOSE_STREAK), { t: who(lg, i), tm: nick(lg, i), k: ls }));
+      else if (ws >= 3) out.push(fill(pick(T.WIN_STREAK), { t: who(lg, i), tm: nick(lg, i), k: ws })); }
+  }
+  return out.slice(0, 7);
+}
+
+function h2h(lg, a, b) {
+  let wa = 0, wb = 0, dr = 0;
+  for (const d of Object.values(lg.jor)) if (d.fin && d.m) for (const m of d.m) {
+    if (!((m.h === a && m.a === b) || (m.h === b && m.a === a))) continue;
+    if (m.hg === m.ag) dr++; else if ((m.hg > m.ag) === (m.h === a)) wa++; else wb++;
+  }
+  return { wa, wb, dr };
+}
+function previa(lg, ev) {
+  const fx = E.fixtures(lg.cfg.n, lg.cfg.seed + ':' + lg.cfg.season)[ev.md - 1] || [], ders = fx.filter(([h, a]) => isHuman(lg, h) && isHuman(lg, a));
+  if (!ders.length) return null;
+  const P = tableOf(lg, seasonDocs(lg));
+  const parts = ders.map(([h, a]) => {
+    const r = h2h(lg, h, a), ph = P.row(h), pa = P.row(a);
+    let s = `${who(lg, h)} 🆚 ${who(lg, a)}\n   ${P.pos[h]}º (${ph.pts} pts) contra ${P.pos[a]}º (${pa.pts} pts)`;
+    s += r.wa + r.wb + r.dr ? `\n   Cara a cara: ${nick(lg, h)} ${r.wa} · empates ${r.dr} · ${nick(lg, a)} ${r.wb}` : '\n   Primer derbi entre ellos. Alguien va a estrenar el orgullo.';
+    return s;
+  });
+  return `🔥 <b>PREVIA DEL DERBI</b> · Jornada ${ev.md}, a las ${hhmm(ev.at)}\n\n${parts.join('\n\n')}\n\n${pick(T.PREV)}\n${SITE}`;
+}
+
+function scorers(lg) {
+  const g = {}, team = {};
+  for (const d of seasonDocs(lg)) for (const m of d.m) for (const e of m.ev || []) if (e.t === 'gol') { g[e.p] = (g[e.p] || 0) + 1; team[e.p] = e.s ? m.a : m.h; }
+  return Object.entries(g).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([p, n]) => ({ p, n, t: team[p] }));
+}
+function digest(lg) {
+  const H = humansIdx(lg), docs = seasonDocs(lg), P = tableOf(lg, docs), now = Date.now(), L1 = [`📰 <b>NOTICIAS DE LA LIGA</b> · ${dayName(now)}`];
+  if (!docs.length) L1.push('Aún no se ha jugado ninguna jornada. Todos invictos… por poco tiempo.');
+  if (H.length) {
+    const r = [...H].sort((a, b) => P.pos[a] - P.pos[b]);
+    L1.push('<b>📊 Entre amigos</b>\n' + r.map((i, k) => `${['🥇', '🥈', '🥉'][k] || '▫️'} ${who(lg, i)} · ${P.pos[i]}º, ${P.row(i).pts} pts${P.row(i).form.length ? ' · ' + P.row(i).form.slice(-5).join('') : ''}`).join('\n'));
+  }
+  const sc = scorers(lg);
+  if (sc.length) L1.push('<b>⚽ Pichichi</b>\n' + sc.map(x => `${esc(E.player(x.p).name)} (${esc(idxName(lg, x.t))}) · ${x.n}`).join('\n'));
+  const wk = H.map(i => { const t = teamsArr(lg)[i]; return { i, spent: (t.ledger || []).filter(e => e.d > now - 7 * DAY && e.amt < 0 && /^(Fichaje|Subasta)/.test(e.why)).reduce((a, e) => a - e.amt, 0) }; }).filter(x => x.spent > 0).sort((a, b) => b.spent - a.spent);
+  if (wk.length) L1.push(`<b>💸 Mercado</b>\n${who(lg, wk[0].i)} es el que más ha gastado esta semana: ${fmtM(wk[0].spent)}.`);
+  const st = H.map(i => ({ i, l: teamsArr(lg)[i].stadium || 0 })).sort((a, b) => b.l - a.l);
+  if (st.length >= 2 && st[0].l > st[st.length - 1].l) L1.push(`<b>🏟️ Estadios</b>\nEl más grande del grupo es el de ${who(lg, st[0].i)}: ${esc(E.STADIUM[st[0].l].n)} (${E.STADIUM[st[0].l].cap.toLocaleString('es-ES')} plazas). ${nick(lg, st[st.length - 1].i)} sigue en ${esc(E.STADIUM[st[st.length - 1].l].n.toLowerCase())}.`);
+  const [today] = madrid(now), hoy = upcoming(lg).filter(e => madrid(e.at)[0] === today && e.at > now && !lg[e.k][e.id]?.fin);
+  if (hoy.length) L1.push('<b>📅 Hoy</b>\n' + hoy.map(e => `${label[e.k]} ${esc(e.name)} a las ${hhmm(e.at)}${humanPairs(lg, e).some(x => x.includes('DERBI')) ? ' · 🔥 hay derbi' : ''}`).join('\n'));
+  if (H.length >= 2 && docs.length) { const r = [...H].sort((a, b) => P.pos[a] - P.pos[b]); L1.push('🎙️ ' + fill(pick(T.CLOSE), { lm: nick(lg, r[r.length - 1]), wm: nick(lg, r[0]) })); }
+  return L1.join('\n\n');
+}
+function piqueNow(lg) {
+  const H = humansIdx(lg), docs = seasonDocs(lg);
+  if (H.length < 2) return '🤷 Aquí solo hay un mánager. Invita a tus amigos, que picarse solo no tiene gracia.';
+  if (!docs.length) return '🥱 Aún no se ha jugado nada y ya estáis nerviosos. Buena señal.';
+  const P = tableOf(lg, docs), r = [...H].sort((a, b) => P.pos[a] - P.pos[b]), top = r[0], bot = r[r.length - 1], g = P.row(top).pts - P.row(bot).pts;
+  return pick([
+    `👑 ${who(lg, top)} va por delante de ${who(lg, bot)} por ${g} puntos. ${nick(lg, bot)}, ¿piensas hacer algo o solo miras?`,
+    `📊 ${nick(lg, bot)} está ${P.pos[bot]}º. ${nick(lg, top)} está ${P.pos[top]}º. No digo nada, solo lo dejo aquí.`,
+    `🍻 A día de hoy, las cañas las paga ${nick(lg, bot)}.`,
+    `🧠 ${nick(lg, top)} entrena, ficha y gana. ${nick(lg, bot)} manda audios. Saquen sus conclusiones.`]);
+}
+function ledgerNews(lg) {
+  const chat = chatOf(lg.code); if (!lg.cfg) return;
+  ST.seen = ST.seen || {};
+  for (const i of humansIdx(lg)) {
+    const t = teamsArr(lg)[i], key = lg.code + ':' + t.id, led = t.ledger || [], max = led.reduce((a, e) => Math.max(a, e.d || 0), 0);
+    if (ST.seen[key] == null) { ST.seen[key] = max; save(); continue; }
+    const fresh = led.filter(e => e.d > ST.seen[key] && e.d > Date.now() - 6 * 3600000);
+    if (max > ST.seen[key]) { ST.seen[key] = max; save(); }
+    if (!chat) continue;
+    for (const e of fresh) {
+      const [kind, ...rest] = String(e.why || '').split(': '), o = { t: who(lg, i), p: esc(rest.join(': ')), x: fmtM(Math.abs(e.amt)) };
+      if (kind === 'Fichaje') send(chat, fill(pick(T.BUY), o) + (Math.abs(e.amt) >= 20 ? pick(T.BUY_BIG) : ''));
+      else if (kind === 'Subasta') send(chat, fill(pick(T.AUC), o));
+      else if (kind === 'Venta') send(chat, fill(pick(T.SELL), o));
+      else if (kind === 'Liberado') send(chat, fill(pick(T.REL), o));
+      else if (kind === 'Obras') send(chat, fill(pick(T.BUILD), { ...o, x: esc(rest.join(': ')) }));
+    }
+  }
 }
 
 /* ---------- comandos ---------- */
@@ -161,7 +346,7 @@ async function link(chat, raw) {
   if (!s || !s.exists()) return send(chat, `No encuentro ninguna liga con el código ${esc(code)}.`);
   await setDoc(doc(db, 'ligas/' + code + '/miembros/' + auth.currentUser.uid), { name: 'Bot de Telegram', bot: true }, { merge: true });
   ST.leagues[code] = { chat }; save(); watch(code);
-  send(chat, `✅ Vinculado a <b>${esc(s.data().name || 'Liga de Amigos')}</b> (${code}).\nAvisaré 10 minutos antes de cada partido, al empezar, con los resultados y la clasificación, las ofertas por vuestros jugadores y lo que escribáis en el muro.\n\nComandos: /proximos /tabla /desvincular`);
+  send(chat, `✅ Vinculado a <b>${esc(s.data().name || 'Liga de Amigos')}</b> (${code}).\nAvisaré 10 minutos antes de cada partido, al empezar, con los resultados y la clasificación, las ofertas por vuestros jugadores y lo que escribáis en el muro.\n\nY como buen vestuario: piques tras cada jornada, previa de los derbis y noticias cada mañana.\n\nComandos: /proximos /tabla /pique /noticias /desvincular`);
 }
 async function cmd(msg) {
   const chat = msg.chat.id, t = (msg.text || '').trim(), [c0, ...rest] = t.split(/\s+/), c = c0.split('@')[0].toLowerCase();
@@ -174,6 +359,8 @@ async function cmd(msg) {
     const now = Date.now(), up = upcoming(lg).filter(e => e.at + LIVE > now && !lg[e.k][e.id]?.fin).slice(0, 5);
     return send(chat, up.length ? '<b>Próximos partidos</b>\n' + up.map(e => `${label[e.k]} ${esc(e.name)} · ${dayName(e.at)} ${hhmm(e.at)}${e.at <= now ? ' 🔴 en juego' : ''}${humanPairs(lg, e).length ? '\n   ' + humanPairs(lg, e).join('\n   ') : ''}`).join('\n') : 'No hay partidos pendientes esta temporada.');
   }
+  if (c === '/noticias') return send(chat, digest(lg));
+  if (c === '/pique') return send(chat, piqueNow(lg));
   if (c === '/tabla') {
     const docs = Object.values(lg.jor).filter(x => x.season === lg.cfg.season && x.fin), tb = E.table(lg.cfg.n, docs);
     return send(chat, '<b>Clasificación</b>\n' + tb.map((r, i) => `${i + 1}. ${isHuman(lg, r.t) ? '<b>' : ''}${esc(idxName(lg, r.t))} · ${r.pts} pts${isHuman(lg, r.t) ? '</b>' : ''}`).join('\n'));
@@ -188,7 +375,7 @@ async function poll() {
 }
 
 await login();
-await tg('setMyCommands', { commands: [{ command: 'vincular', description: 'Vincular este chat a una liga (código de 6 letras)' }, { command: 'proximos', description: 'Próximos partidos' }, { command: 'tabla', description: 'Clasificación' }, { command: 'desvincular', description: 'Dejar de recibir avisos aquí' }] });
+await tg('setMyCommands', { commands: [{ command: 'vincular', description: 'Vincular este chat a una liga (código de 6 letras)' }, { command: 'proximos', description: 'Próximos partidos' }, { command: 'tabla', description: 'Clasificación' }, { command: 'pique', description: 'Que el bot pique al grupo' }, { command: 'noticias', description: 'Noticias de la liga' }, { command: 'desvincular', description: 'Dejar de recibir avisos aquí' }] });
 for (const code in ST.leagues) watch(code);
 setInterval(tick, 30000); setTimeout(tick, 5000);
 poll();
