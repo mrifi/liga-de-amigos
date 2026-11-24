@@ -916,7 +916,7 @@ function clubView() {
     <section class="panel"><h3>Tu club</h3><div class="fields" style="margin-top:10px"><label class="f">Nombre<input type="text" id="c-name" maxlength="24" value="${esc(t.name)}"></label><label class="f">Siglas<input type="text" id="c-short" maxlength="3" value="${esc(t.short)}"></label></div>
     <div class="grp">Colores</div><div class="colors">${COLORS.map((c, i) => `<button data-act="color" data-arg="${i}" aria-pressed="${c[0] === t.colors[0] && c[1] === t.colors[1]}" aria-label="Colores ${i + 1}" style="background:linear-gradient(135deg,${c[0]} 55%,${c[1]} 55%)"></button>`).join('')}</div>
     <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="saveclub">Guardar</button><button class="btn ghost" data-act="leave">Dejar el equipo a la IA</button></div></section>
-    <section class="panel"><h3>¿Cómo se juega?</h3><p class="small mute">Repasa en un minuto lo básico: horarios, directo, alineación, mercado y club.</p><button class="btn" data-act="tutoagain">Ver el tutorial</button></section>${webPanel()}</div><div class="stackp">${adminPanel()}</div></div>`;
+    <section class="panel"><h3>¿Cómo se juega?</h3><p class="small mute">Repasa en un minuto lo básico: horarios, directo, alineación, mercado y club.</p><button class="btn" data-act="tutoagain">Ver el tutorial</button></section>${webPanel()}</div><div class="stackp">${tgPanel()}${adminPanel()}</div></div>`;
   }
   return html;
 }
@@ -928,6 +928,13 @@ const WEB = () => window.LIGA_WEB || null;
 function webPanel() {
   const w = WEB(); if (!w) return '';
   return `<section class="panel"><h3>Código de la liga</h3><div class="code-big" aria-label="Código ${esc(w.code.split('').join(' '))}">${esc(w.code)}</div><p class="small mute">Pásaselo a tus amigos: entran en <b>${esc(w.host)}</b>, inician sesión y escriben este código. Cada uno coge un equipo libre.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn y" data-act="webshare">Invitar amigos</button><button class="btn ghost" data-act="webswitch">Mis ligas</button><button class="btn ghost" data-act="weblogout">Cerrar sesión</button></div></section>`;
+}
+const TG_BOT = 'LigaDeAmigosRifiBot';
+function tgPanel() {
+  const w = WEB(); if (!w) return '';
+  return `<section class="panel"><h3>Avisos por Telegram</h3><p class="small mute">El bot avisa 10 minutos antes de cada partido (liga, copa y Champions), manda los resultados con goleadores y la clasificación, las ofertas por vuestros jugadores y lo que escribáis en el muro.</p>
+  <ol class="small" style="margin:8px 0 10px 18px;line-height:1.6"><li>Crea un grupo de Telegram con tus amigos (o usa uno que ya tengáis).</li><li>Añade a <b>@${TG_BOT}</b> al grupo.</li><li>En el grupo escribe: <code>/vincular ${esc(w.code)}</code></li></ol>
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn y" href="https://t.me/${TG_BOT}?startgroup=liga" target="_blank" rel="noopener">Añadir el bot a un grupo</a><button class="btn ghost" data-act="tgcopy">Copiar /vincular ${esc(w.code)}</button></div></section>`;
 }
 function adminPanel() {
   if (!S.owner || !D) return '';
@@ -1128,6 +1135,7 @@ const ACT = {
   close: () => { S.modal = null; S.rp = null; render(); },
   tuto: i => { S.modal = { type: 'tuto', i: +i }; render(); document.querySelector('.tuto-card .btn.y')?.focus(); },
   tutoend: to => { S.modal = null; if (D.my && !D.my.tuto) saveTeam(D.my.id, { tuto: 1 }); if (to === 'club') { S.view = 'club'; S.csub = 'club'; } render(); window.scrollTo(0, 0); },
+  tgcopy: async () => { const w = WEB(); if (!w) return; try { await navigator.clipboard.writeText('/vincular ' + w.code); toast('Copiado: pégalo en el grupo de Telegram'); } catch (e) { toast('Escribe en el grupo: /vincular ' + w.code); } },
   webshare: async () => { const w = WEB(); if (!w) return; const txt = `Únete a mi liga "${S.cfg?.name || 'Liga de Amigos'}": entra en ${w.link} y pon el código ${w.code}`; try { if (navigator.share) { await navigator.share({ title: 'Liga de Amigos', text: txt, url: w.link }); return; } } catch (e) { if (e && e.name === 'AbortError') return; } try { await navigator.clipboard.writeText(txt); toast('Invitación copiada: pégala en WhatsApp'); } catch (e) { toast('Código: ' + w.code); } },
   webswitch: () => WEB()?.switch(), weblogout: () => WEB()?.logout(),
   tutoagain: () => { S.modal = { type: 'tuto', i: 0 }; render(); }, ovclose: (a, el, e) => { if (e.target === el) ACT.close(); },

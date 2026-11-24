@@ -1,0 +1,7 @@
+{
+  "name": "liga-bot",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs",
+  "dependencies": { "firebase": "^11.0.2" }
+}

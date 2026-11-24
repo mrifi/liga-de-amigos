@@ -34,3 +34,9 @@ Juego de gestión de fútbol estilo Top Eleven para jugar una liga con tus amigo
 - Web: Netlify publica la carpeta `public/` (ver `netlify.toml`).
 - Reglas de Firestore: `firebase deploy --only firestore:rules --project liga-de-amigos-rifi`.
 - Para entrar con Google desde el dominio de Netlify, añádelo en Firebase → Authentication → Settings → Authorized domains.
+
+## Bot de Telegram (@LigaDeAmigosRifiBot)
+
+Avisa 10 min antes de cada partido, publica resultados con goleadores y clasificación, ofertas y el muro.
+En el VPS: `cd /var/www/liga && git pull && bash deploy/bot.sh` (la primera vez pide el token de BotFather y lo guarda en /etc/liga-bot.env).
+En Telegram: añade el bot a vuestro grupo y escribe `/vincular CODIGO`.

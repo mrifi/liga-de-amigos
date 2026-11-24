@@ -1,0 +1,1 @@
+{"base":"img/jugador/jugador.gltf.json","clips":{"run":["img/jugador/jugador.gltf.json","run"],"kick":["img/jugador/jugador.gltf.json","kick"],"slide":["img/jugador/jugador.gltf.json","slide"],"idle":["img/jugador/jugador.gltf.json","idle"],"cheer":["img/jugador/jugador.gltf.json","cheer"]},"height":1.8,"tint":true}
