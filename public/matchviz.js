@@ -113,18 +113,25 @@
       else if (pl.type === 'inj') { banners.push({ t: T, d: 3, type: 'les', s, p: pl.p }); say(T, E.player(pl.p).name + ' se duele en el césped.', true); }
     }
     // partido corto (directo de pocos minutos): solo se escenifican las jugadas importantes; el resto va al relato y a los avisos
+    const silent = []; let dbgShort = null;
     if (LIVE_S < 600 && m.v === 2) {
-      const LIGHT = { tackle: 1, drib: 1, off: 1, inj: 1 }, keep = [], gapOf = pl => pl.type === 'goal' ? 9 : pl.type === 'pen' ? 8 : 4.6;
-      let lastEnd = -1;
+      // lo que no da tiempo a enseñar en el campo no se narra: el comentarista solo cuenta lo que se ve.
+      // Primero se colocan goles, penaltis, tarjetas y lesiones (lo más cerca posible de su minuto);
+      // luego, en los huecos libres, paradas, disparos fuera y córners.
+      const LIGHT = { tackle: 1, drib: 1, off: 1 }, isMust = pl => pl.type === 'goal' || pl.type === 'pen' || pl.type === 'inj' || (pl.type === 'foul' && pl.card);
+      const aft = pl => pl.type === 'goal' || pl.type === 'pen' ? CEL + KOD + 1.2 : 2.4, keep = [];
+      let prevEnd = -1;
+      for (const pl of plays.filter(isMust)) { pl.t0 = pl.t; pl.h1 = pl.m <= 45; if (pl.t - LEAD0(pl) < prevEnd) pl.t = prevEnd + LEAD0(pl); prevEnd = pl.t + aft(pl); keep.push(pl); }
+      const busy = keep.map(pl => [pl.t - LEAD0(pl) - .5, pl.t + aft(pl) + .5]);
       for (const pl of plays) {
-        const must = pl.type === 'goal' || pl.type === 'pen';
-        if (!must && (LIGHT[pl.type] || (pl.type === 'foul' && !pl.card) || pl.t - LEAD0(pl) < lastEnd)) { lightPlay(pl); continue; }
-        keep.push(pl); lastEnd = Math.max(lastEnd, pl.t) + gapOf(pl);
+        if (isMust(pl)) continue;
+        if (LIGHT[pl.type] || pl.type === 'foul') { silent.push(pl); continue; }
+        const a = pl.t - LEAD0(pl), b = pl.t + aft(pl) + 1.5;
+        if (a < 1 || busy.some(([x, y]) => a < y && b > x)) { silent.push(pl); continue; }
+        pl.t0 = pl.t; pl.h1 = pl.m <= 45; busy.push([a, b]); keep.push(pl);
       }
-      // si dos jugadas se pisan, la segunda espera a que acabe la primera (sin cambiar de parte)
-      let prevEnd = -1; const aft = pl => pl.type === 'goal' || pl.type === 'pen' ? CEL + KOD + 1.2 : 2.4;
-      for (const pl of keep) { pl.h1 = pl.m <= 45; const st = pl.t - LEAD0(pl); if (st < prevEnd) pl.t = prevEnd + LEAD0(pl); prevEnd = pl.t + aft(pl); }
-      plays.length = 0; plays.push(...keep);
+      keep.sort((p, q) => p.t - q.t);
+      plays.length = 0; dbgShort = { keep: keep.length, silent: silent.length, shift: keep.reduce((mx, pl) => Math.max(mx, pl.t - pl.t0), 0) }; plays.push(...keep);
     }
     const END = LIVE_S + (LIVE_S < 600 ? 40 : 6), N = Math.ceil(END / DT) + 2;
     const TR = all.map(() => new Float32Array(N * 2).fill(NaN));
@@ -642,7 +649,7 @@
     evT.filter(e => e.t === 'cam').forEach(e => { banners.push({ t: e.tt, d: 3, type: 'sub', s: e.s, p: e.p, q: e.q }); say(e.tt, 'Cambio: entra ' + nm(e.p) + ', sale ' + nm(e.q) + '.'); });
     banners.sort((a, b) => a.t - b.t); comm.sort((a, b) => a.t - b.t); kicks.sort((a, b) => a.t - b.t);
     const windows = [...goals.map(g => g.t), ...banners.filter(b => ['miss', 'save', 'roja', 'les', 'pen', 'pal', 'seg', 'reg'].includes(b.type)).map(b => b.t)].sort((a, b) => a - b);
-    return { m, P, side, all, N, TR, BX, BY, BZ, BO, BT, BS, BF, kicks, netT, phases, banners, comm, goals, windows, plays, active, possT };
+    return { m, P, side, all, N, TR, BX, BY, BZ, BO, BT, BS, BF, kicks, netT, phases, banners, comm, goals, windows, plays, active, possT, dbgShort };
   }
 
   /* ---------- muestreo en un instante ---------- */
@@ -1140,7 +1147,7 @@
     function showEnd(on) { if (!el.end || !o.summary) return; endShown = on; if (!on) { el.end.hidden = true; return; } el.end.innerHTML = `<div class="mv-endc">${o.summary(m)}<div class="mv-enda"><button class="mv-b" data-act2="replay">${VI.play}Repetir</button><button class="mv-b" data-act2="endclose">Ver el campo</button><button class="mv-b on" data-act2="exit">Salir</button></div></div>`; el.end.hidden = false; }
     function optsHTML() { return `<span class="mv-opts"><button class="mv-b ${SND.on ? 'on' : ''}" data-o="snd" aria-pressed="${SND.on}" aria-label="Sonido">${SND.on ? VI.snd : VI.mute}</button><input class="mv-vol" type="range" min="0" max="100" value="${Math.round(SND.vol * 100)}" aria-label="Volumen"><button class="mv-b ${fxOn ? 'on' : ''}" data-o="fx" aria-pressed="${fxOn}">Efectos</button><button class="mv-b" data-act2="full" aria-label="Pantalla completa">${VI.full}</button>${view === '3d' && r3 && r3.hasRig ? `<button class="mv-b ${r3.rig ? 'on' : ''}" data-o="rig" aria-pressed="${r3.rig}" title="Muñecos animados">Animados</button>` : ''}${view === '3d' ? `<button class="mv-b ${r3 && r3.hd ? 'on' : ''}" data-o="hd" aria-pressed="${!!(r3 && r3.hd)}" title="Sombras y más resolución">HD</button>` : ''}</span>`; }
     function ctrlHTML() {
-      if (mode === 'live') return `<span class="mv-live"><i></i> En directo · sincronizado con todos</span>${o.liveNote ? `<span class="mv-lnote">${o.liveNote()}</span>` : ''}<button class="mv-b" data-act2="fromstart">Ver desde el inicio</button>` + optsHTML();
+      if (mode === 'live') return `<span class="mv-live"><i></i> En directo</span>${o.liveNote ? `<span class="mv-lnote">${o.liveNote()}</span>` : ''}<button class="mv-b" data-act2="fromstart">Ver desde el inicio</button>` + optsHTML();
       return `<button class="mv-b" data-act2="pause" aria-label="${paused ? 'Reanudar' : 'Pausa'}">${paused ? VI.play : VI.pause}</button>${[1, 4, 10].map(s => `<button class="mv-b ${!high && speed === s ? 'on' : ''}" data-sp="${s}">x${s}</button>`).join('')}<button class="mv-b ${high ? 'on' : ''}" data-act2="high">Solo jugadas</button><input class="mv-seek" type="range" min="0" max="${Math.round(liveOpen() ? liveR() : LIVE_S)}" value="${Math.round(r)}" aria-label="Minuto">${o.live ? '<button class="mv-b" data-act2="golive">Volver al directo</button>' : ''}` + optsHTML();
     }
     function setView(v) {

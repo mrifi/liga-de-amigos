@@ -478,6 +478,10 @@ td .tn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 body[data-tutonav=inicio] nav.tabs [data-arg=inicio],body[data-tutonav=equipo] nav.tabs [data-arg=equipo],body[data-tutonav=mercado] nav.tabs [data-arg=mercado],body[data-tutonav=club] nav.tabs [data-arg=club],body[data-tutonav=liga] nav.tabs [data-arg=liga]{color:var(--amber);box-shadow:inset 0 0 0 2px var(--amber);border-radius:10px;animation:tutoHl 1.4s ease-in-out infinite}
 @keyframes tutoHl{50%{box-shadow:inset 0 0 0 2px rgba(255,178,28,.25)}}
 @media(prefers-reduced-motion:reduce){.tuto-card,body[data-tutonav] nav.tabs button{animation:none!important}}
+
+/* controles del visor: que nunca se monten unos encima de otros en paneles estrechos */
+.mv-opts{flex-wrap:wrap;row-gap:6px}.mv-opts .mv-b{flex-shrink:0}.mv-vol{min-width:72px}
+.mv-tabs button{font-size:clamp(13px,1.35vw,17px);padding:8px 2px;white-space:nowrap}
 /* acceso (versión web) */
 body.gated #app{display:none}
 .gate{position:fixed;inset:0;z-index:100;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:max(24px,env(safe-area-inset-top)) 14px 32px;background:radial-gradient(120% 70% at 50% 0%,rgba(51,173,82,.18),transparent 60%),var(--bg)}

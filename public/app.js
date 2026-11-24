@@ -1200,7 +1200,8 @@ function liveSig() {
   const st = [...D.cur, ...Object.values(S.cupRaw), ...Object.values(S.clRaw)].map(d => now < d.at ? 0 : now < d.at + LIVE ? 1 : 2).join('');
   const mins = D.live.map(liveMinute).join(',') + (S.rp ? 'r' + Math.floor((now - S.rp.t0) / 400) : '');
   const due = !D.done && D.nextMd <= D.total && kickAt(D.nextMd) <= now ? 'd' : '';
-  return [st, mins, due];
+  const fin = needFin(now) ? 'f' : ''; // en cuanto se puede cerrar un partido, se cierra (sin esperar al repaso de 20 s)
+  return [st, mins, due + fin];
 }
 setInterval(() => {
   document.querySelectorAll('[data-cd]').forEach(el => el.textContent = cdText(+el.dataset.cd));
