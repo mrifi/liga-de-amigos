@@ -29,10 +29,13 @@ for (const [k, t] of Object.entries(ST.sent)) if (Date.now() - t > 40 * DAY) del
 /* ---------- Telegram ---------- */
 const tg = async (method, body) => {
   try {
-    const r = await fetch(`https://api.telegram.org/bot${TOKEN}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    const j = await r.json(); if (!j.ok) console.warn('tg', method, j.description); return j;
+    const r = await fetch(`https://api.telegram.org/bot${TOKEN}/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body, (k, v) => k === '__retry' ? undefined : v) });
+    const j = await r.json();
+    if (!j.ok && j.parameters?.retry_after && !body.__retry) { await sleep((j.parameters.retry_after + 1) * 1000); return tg(method, { ...body, __retry: 1 }); }
+    if (!j.ok) console.warn('tg', method, j.description); return j;
   } catch (e) { console.warn('tg', method, e.message); return {}; }
 };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 const send = (chat, html) => tg('sendMessage', { chat_id: chat, text: html, parse_mode: 'HTML', disable_web_page_preview: true });
 const hhmm = t => new Date(t).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: TZ });
@@ -58,11 +61,12 @@ const dec = d => { if (!d) return d; const o = {}; for (const k in d) { const v 
 const L = {}; // code -> { cfg, teams, jor, cup, cl, chat, unsub[] , ready }
 function watch(code) {
   if (L[code]) return;
-  const lg = L[code] = { code, cfg: null, teams: {}, jor: {}, cup: {}, cl: {}, mem: {}, unsub: [], boot: Date.now() };
+  const lg = L[code] = { code, cfg: null, teams: {}, jor: {}, cup: {}, cl: {}, mem: {}, sorteos: {}, unsub: [], boot: Date.now() };
   const P = 'ligas/' + code + '/';
   const col = (name, fn) => lg.unsub.push(onSnapshot(collection(db, P + name), q => fn(q), e => console.warn(code, name, e.code)));
   lg.unsub.push(onSnapshot(doc(db, P + 'liga/config'), s => { lg.cfg = s.exists() ? dec(s.data()) : null; }, e => console.warn(code, 'cfg', e.code)));
   col('equipos', q => { q.docs.forEach(d => { lg.teams[d.id] = dec(d.data()); }); ledgerNews(lg); });
+  col('sorteos', q => q.docs.forEach(d => { lg.sorteos[d.id] = dec(d.data()); }));
   col('miembros', q => q.docs.forEach(d => { lg.mem[d.id] = d.data(); }));
   const store = (k, name) => col(name, q => {
     q.docs.forEach(d => { lg[k][d.id] = dec(d.data()); });
@@ -91,7 +95,7 @@ const teamsArr = lg => { const n = lg.cfg?.n || 0; return [...Array(n)].map((_, 
 const teamName = (lg, id) => (typeof id === 'number' ? teamsArr(lg)[id]?.name : lg.teams[id]?.name);
 function idxName(lg, i, doc) {
   const n = lg.cfg.n; if (i < n) return teamsArr(lg)[i]?.name || 'Equipo ' + (i + 1);
-  const r0 = lg.cl['s' + lg.cfg.season + '-r0'] || doc; if (!r0 || !r0.qual) return 'Club europeo';
+  const r0 = lg.cl['s' + lg.cfg.season + '-r0'] || lg.sorteos['s' + lg.cfg.season + '-cl'] || doc; if (!r0 || !r0.qual) return 'Club europeo';
   return E.euroClubs(lg.cfg.seed, lg.cfg.season, 8 - r0.qual.length, r0.lvl)[i - n]?.name || 'Club europeo';
 }
 const isHuman = (lg, i) => i < lg.cfg.n && !!teamsArr(lg)[i]?.owner;
@@ -111,8 +115,11 @@ function upcoming(lg) {
 }
 const label = { jor: '⚽', cup: '🏆', cl: '⭐' };
 function humanPairs(lg, ev) {
-  if (ev.k !== 'jor') return [];
-  const fx = E.fixtures(lg.cfg.n, lg.cfg.seed + ':' + lg.cfg.season)[ev.md - 1] || [];
+  let fx = [];
+  if (ev.k === 'jor') fx = E.fixtures(lg.cfg.n, lg.cfg.seed + ':' + lg.cfg.season)[ev.md - 1] || [];
+  else if (ev.k === 'cup') { const d = lg.cup[ev.id]; fx = d?.pairs || (ev.id.endsWith('-r0') ? E.cupBracket(lg.cfg.n, lg.cfg.seed + ':' + lg.cfg.season).first : []); }
+  else if (ev.k === 'cl') { const d = lg.cl[ev.id], sd = lg.sorteos['s' + lg.cfg.season + '-cl'], r = +ev.id.split('-r')[1]; fx = d?.pairs || (sd && r < 3 ? sd.groups.flatMap(g => E.CL_RR[r].map(([a, b]) => [g[a], g[b]])) : []); }
+  fx = fx.filter(p => p && p[0] != null && p[1] != null);
   return fx.filter(([h, a]) => isHuman(lg, h) || isHuman(lg, a)).map(([h, a]) => {
     const derby = isHuman(lg, h) && isHuman(lg, a);
     return `${derby ? '🔥 ' : ''}<b>${esc(idxName(lg, h))}</b> vs <b>${esc(idxName(lg, a))}</b>${derby ? ' · DERBI' : ''}`;
@@ -134,6 +141,7 @@ function tick() {
       if (dt <= 0 && dt > -90000) once(code + ':ko:' + ev.k + ev.id, () => send(chat, `🔴 ¡Empieza ${esc(ev.name)}! ${SITE}`));
       if (ev.k === 'jor' && dt <= 3 * 3600000 && dt > 20 * 60000) { const pv = previa(lg, ev); if (pv) once(code + ':pv:' + ev.id, () => send(chat, pv)); }
     }
+    drawTick(lg, chat, now);
     const [dk, hr] = madrid(now); if (hr >= 10 && hr < 12) once(code + ':dig:' + dk, () => send(chat, digest(lg)));
   }
 }
@@ -335,6 +343,87 @@ function ledgerNews(lg) {
       else if (kind === 'Liberado') send(chat, fill(pick(T.REL), o));
       else if (kind === 'Obras') send(chat, fill(pick(T.BUILD), { ...o, x: esc(rest.join(': ')) }));
     }
+  }
+}
+
+
+/* ---------- sorteos en directo ---------- */
+const drawKicks = lg => [...Array(total(lg))].map((_, i) => kickAt(lg, i + 1));
+const clOn = lg => total(lg) >= 9;
+const clDrawAt = lg => E.drawTime(dayAt(lg, 3), drawKicks(lg));
+const cupRounds = lg => E.cupBracket(lg.cfg.n, lg.cfg.seed + ':' + lg.cfg.season).rounds;
+const cupDrawAt = lg => { const R = cupRounds(lg), T = total(lg), step = 4 * R <= T - 3 ? 4 : 2; return E.drawTime(dayAt(lg, Math.min(T, 4)), drawKicks(lg)); };
+const tAvg = (lg, t) => (t.squad || []).reduce((a, id) => a + E.ovr(id, lg.cfg.season, t.xp?.[id] || 0), 0) / Math.max(1, (t.squad || []).length);
+function clCompute(lg) {
+  const c = lg.cfg, Sx = c.season, n = c.n, q = Math.min(4, Math.floor(n / 2)), T = teamsArr(lg);
+  const prev = Object.values(lg.jor).filter(d => d.season === Sx - 1 && d.m);
+  let qual;
+  if (Sx > 1 && prev.length) qual = E.table(n, prev).slice(0, q).map(r => r.t);
+  else qual = T.map((t, i) => ({ i, h: t?.owner ? 1 : 0, a: t ? tAvg(lg, t) : 0 })).sort((x, y) => y.h - x.h || y.a - x.a).slice(0, q).map(x => x.i);
+  const lvl = Math.round(qual.reduce((a, i) => a + tAvg(lg, T[i]), 0) / qual.length);
+  const eu = E.euroClubs(c.seed, Sx, 8 - qual.length, lvl).map((t, k) => ({ ...t, idx: n + k }));
+  const { groups, seq } = E.clDraw(c.seed, Sx, qual, eu.map(t => t.idx));
+  return { qual, lvl, groups, seq, eu };
+}
+const nameAny = (lg, i, eu) => i < lg.cfg.n ? idxName(lg, i) : (eu.find(t => t.idx === i)?.name || 'Club europeo');
+const whoAny = (lg, i, eu) => isHuman(lg, i) ? who(lg, i) : `<b>${esc(nameAny(lg, i, eu))}</b>${i >= lg.cfg.n ? '' : ' <i>(IA)</i>'}`;
+async function ball(chat, teaser, reveal) {
+  const m = await send(chat, teaser); await sleep(3500);
+  if (m?.result?.message_id) await tg('editMessageText', { chat_id: chat, message_id: m.result.message_id, text: reveal, parse_mode: 'HTML', disable_web_page_preview: true });
+  else await send(chat, reveal);
+  await sleep(3500);
+}
+const BALL = ['🥁 Se mueve el bombo…', '🥁 Sale una bola…', '🥁 La mano inocente busca…', '🥁 Bola en la mano… se abre…', '🥁 Silencio en la sala…'];
+async function clCeremony(lg, chat) {
+  const Sx = lg.cfg.season, key = 's' + Sx + '-cl', ref = doc(db, 'ligas/' + lg.code + '/sorteos/' + key);
+  let saved = (await getDoc(ref).catch(() => null))?.data(); saved = saved ? dec(saved) : null;
+  const d = clCompute(lg);
+  if (saved && saved.groups) { d.qual = saved.qual; d.lvl = saved.lvl; d.groups = saved.groups; d.eu = E.euroClubs(lg.cfg.seed, Sx, 8 - d.qual.length, d.lvl).map((t, k) => ({ ...t, idx: lg.cfg.n + k })); d.seq = [...d.qual, ...d.eu.map(t => t.idx)].map(t => ({ t, pot: t < lg.cfg.n ? 1 : 2, g: d.groups[0].includes(t) ? 0 : 1 })); }
+  else await setDoc(ref, Object.fromEntries(Object.entries({ qual: d.qual, lvl: d.lvl, groups: d.groups, at: clDrawAt(lg), by: 'bot' }).map(([k, v]) => [k, JSON.stringify(v)])));
+  const G = 'AB';
+  await send(chat, `⭐ <b>SORTEO DE LA CHAMPIONS · EN DIRECTO</b>\n\n<b>Bombo 1 · vuestra liga</b>\n${d.qual.map(i => '• ' + whoAny(lg, i, d.eu)).join('\n')}\n\n<b>Bombo 2 · Europa</b>\n${d.eu.map(t => '• ' + esc(t.name)).join('\n')}\n\nDos grupos de 4. Los ganadores de grupo juegan la final. Empezamos 👇`);
+  await sleep(6000);
+  const placed = [[], []];
+  for (const [k, x] of d.seq.entries()) {
+    placed[x.g].push(x.t);
+    let line = `${x.pot === 1 ? '🟡' : '🔵'} ${whoAny(lg, x.t, d.eu)} → <b>Grupo ${G[x.g]}</b>`;
+    if (isHuman(lg, x.t)) { const mates = placed[x.g].filter(t => t !== x.t && isHuman(lg, t)); if (mates.length) line += `\n💥 ¡DERBI EN EL GRUPO ${G[x.g]}! ${mates.map(t => nick(lg, t)).join(' y ')} contra ${nick(lg, x.t)}. Esto se pone feo.`; else if (x.t < lg.cfg.n) line += `\n${pick(['😬 A ver qué le toca…', '🙏 Que no le caiga un gigante…', '👀 Atentos a sus rivales…'])}`; }
+    await ball(chat, `${pick(BALL)}\n<i>Bola ${k + 1} de ${d.seq.length} · bombo ${x.pot}</i>`, line);
+  }
+  const H = d.qual.filter(i => isHuman(lg, i)), same = [0, 1].map(g => H.filter(i => d.groups[g].includes(i)));
+  let tail = same.filter(a => a.length >= 2).map(a => `🔥 ${a.map(i => nick(lg, i)).join(' vs ')}: derbi europeo asegurado.`);
+  if (!tail.length && H.length >= 2) tail.push(`🤝 ${H.map(i => nick(lg, i)).join(' y ')} en grupos distintos: solo os podéis ver en la final. Si llegáis.`);
+  await send(chat, `📋 <b>ASÍ QUEDAN LOS GRUPOS</b>\n\n${d.groups.map((g, gi) => `<b>Grupo ${G[gi]}</b>\n${g.map(i => '• ' + whoAny(lg, i, d.eu)).join('\n')}`).join('\n\n')}\n\n${tail.join('\n')}${tail.length ? '\n' : ''}⭐ Primera jornada: ${dayName(dayAt(lg, 3))} a las ${hhmm(dayAt(lg, 3))}.\n${SITE}`);
+}
+async function cupCeremony(lg, chat) {
+  const b = E.cupBracket(lg.cfg.n, lg.cfg.seed + ':' + lg.cfg.season), R = b.rounds, eu = [];
+  await send(chat, `🏆 <b>SORTEO DE LA COPA · EN DIRECTO</b>\n\n${lg.cfg.n} equipos, eliminatoria a partido único. Si hay empate, penaltis.\nPrimera ronda: <b>${esc(E.cupRoundName(0, R))}</b>. Empezamos 👇`);
+  await sleep(6000);
+  for (const [k, [h, a]] of b.first.entries()) {
+    if (h == null && a == null) continue;
+    let line;
+    if (h == null || a == null) line = `🎟️ ${whoAny(lg, h ?? a, eu)} pasa directo a la siguiente ronda. Qué suerte tienen algunos.`;
+    else { line = `⚔️ ${whoAny(lg, h, eu)} 🆚 ${whoAny(lg, a, eu)}`;
+      if (isHuman(lg, h) && isHuman(lg, a)) line += `\n💥 ¡DERBI A LA PRIMERA! ${nick(lg, h)} y ${nick(lg, a)}: uno se va a casa ya.`;
+      else if (isHuman(lg, h) || isHuman(lg, a)) line += `\n${pick(['😏 Cruce asequible… o no.', '👀 Ojo, que la IA también muerde.', '🍀 Suerte, la va a necesitar.'])}`; }
+    await ball(chat, `${pick(BALL)}\n<i>Cruce ${k + 1} de ${b.first.length}</i>`, line);
+  }
+  const H = []; b.first.forEach((p, k) => p.forEach(t => { if (t != null && isHuman(lg, t)) H.push({ t, k }); }));
+  const meets = [];
+  for (let x = 0; x < H.length; x++) for (let y = x + 1; y < H.length; y++) { const r = E.cupMeetRound(H[x].k, H[y].k); if (r > 0) meets.push(`🔮 ${nick(lg, H[x].t)} y ${nick(lg, H[y].t)} se cruzarían en <b>${esc(E.cupRoundName(r, R))}</b>.`); }
+  await send(chat, `📋 <b>CUADRO DE LA COPA</b>\n\n${b.first.map(([h, a]) => h == null || a == null ? (h ?? a) == null ? '' : `• ${whoAny(lg, h ?? a, eu)} (pasa)` : `• ${whoAny(lg, h, eu)} 🆚 ${whoAny(lg, a, eu)}`).filter(Boolean).join('\n')}\n\n${meets.slice(0, 6).join('\n')}${meets.length ? '\n' : ''}🏆 ${esc(E.cupRoundName(0, R))}: ${dayName(cupAtR(lg, 0))} a las ${hhmm(cupAtR(lg, 0))}.\n${SITE}`);
+}
+const cupAtR = (lg, r) => { const R = cupRounds(lg), T = total(lg), step = 4 * R <= T - 3 ? 4 : 2; return dayAt(lg, Math.min(T, 4 + step * r)); };
+const running = {};
+function drawTick(lg, chat, now) {
+  const S = lg.cfg.season, list = [{ k: 'cup', at: cupDrawAt(lg), name: 'la Copa', ico: '🏆', run: cupCeremony, done: !!lg.cup['s' + S + '-r0'] }];
+  if (clOn(lg)) list.push({ k: 'cl', at: clDrawAt(lg), name: 'la Champions', ico: '⭐', run: clCeremony, done: !!lg.cl['s' + S + '-r0'] || !!lg.sorteos['s' + S + '-cl'] });
+  for (const x of list) {
+    if (x.done && !running[lg.code + x.k]) continue;
+    const dt = x.at - now, id = lg.code + ':draw:' + x.k + ':s' + S;
+    if (dt <= 8 * 3600000 && dt > 15 * 60000) once(id + ':ann', () => send(chat, `${x.ico}🎱 <b>Hoy a las ${hhmm(x.at)}: sorteo de ${x.name} EN DIRECTO</b> aquí en el grupo.\nNo vale mirar en el juego: los cruces se desvelan cuando acabe. Traed palomitas 🍿`));
+    if (dt <= 10 * 60000 && dt > 60000) once(id + ':10', () => send(chat, `⏳ En 10 minutos, sorteo de ${x.name}. Id preparando las excusas.`));
+    if (dt <= 0 && dt > -10 * 60000 && !x.done) once(id + ':run', () => { running[lg.code + x.k] = 1; x.run(lg, chat).catch(e => console.warn('sorteo', e.message)).finally(() => { delete running[lg.code + x.k]; }); });
   }
 }
 

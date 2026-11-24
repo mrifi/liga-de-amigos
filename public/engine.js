@@ -587,6 +587,21 @@
     const pairs = []; for (let i = 0; i < size / 2; i++) pairs.push([slots[i], slots[size - 1 - i]]);
     return { size, rounds: Math.log2(size), first: pairs };
   }
+  // Sorteo de la Champions: bombo 1 = clubes de la liga, bombo 2 = europeos. Dos grupos de 4.
+  function clDraw(seed, season, qual, euIdx) {
+    const r = rng('sorteo' + seed + ':' + season), sh = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+    const groups = [[], []], seq = [];
+    sh(qual).forEach((t, k) => { const g = k % 2; groups[g].push(t); seq.push({ t, pot: 1, g }); });
+    sh(euIdx).forEach(t => { const g = groups[0].length <= groups[1].length ? 0 : 1; groups[g].push(t); seq.push({ t, pot: 2, g }); });
+    return { groups, seq };
+  }
+  // Hora del sorteo: una hora antes de la última jornada de liga que empiece al menos 3 h antes del primer partido.
+  function drawTime(firstAt, kicks) {
+    let best = -Infinity; for (const k of kicks) { const t = k - 3600000; if (t <= firstAt - 3 * 3600000 && t > best) best = t; }
+    return best > -Infinity ? best : firstAt - 2 * 3600000;
+  }
+  // Ronda (0 = primera) en la que se cruzarían los equipos de los emparejamientos p y q de la primera ronda.
+  function cupMeetRound(p, q) { let r = 0; while (p !== q) { p >>= 1; q >>= 1; r++; } return r; }
   function cupRoundName(round, rounds) { const left = rounds - 1 - round; return left === 0 ? 'Final' : left === 1 ? 'Semifinales' : left === 2 ? 'Cuartos' : left === 3 ? 'Octavos' : 'Ronda ' + (round + 1); }
   function penaltyShootout(seed) {
     const r = rng('pens' + seed); let h = 0, a = 0;
@@ -625,5 +640,5 @@
     return Object.values(row).sort((x, y) => y.pts - x.pts || (y.gf - y.gc) - (x.gf - x.gc) || y.gf - x.gf || group.indexOf(x.t) - group.indexOf(y.t));
   }
   const cupWinner = (doc, k) => { const x = doc.m[k], p = doc.pens[k]; return x.hg > x.ag || (p && p[0] > p[1]) ? x.h : x.a; };
-  G.ENG = { SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
+  G.ENG = { clDraw, drawTime, cupMeetRound, DRAW_SHOW: 4 * 60000, SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
 })(typeof window !== 'undefined' ? window : globalThis);

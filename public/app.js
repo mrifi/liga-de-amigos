@@ -255,9 +255,15 @@ async function cupTick() {
   }
   return false;
 }
+function drawPanel(kind, at, inner) {
+  const now = Date.now(), live = now >= at, tg = !!WEB();
+  return `<section class="panel draw-pend"><div class="comph">${compLogo(kind, 56)}<div><h3>${live ? '🔴 Sorteo en directo' : '🎱 Sorteo pendiente'}</h3><small class="mute">${kind === 'copa' ? 'Copa' : 'Champions'} · temporada ${D.Sx}</small></div></div>
+  <p style="margin-top:10px">${live ? 'Se está sorteando ahora mismo' : `El sorteo es el <b>${fmtKick(at)}</b>`}${tg ? ', en directo en el grupo de Telegram de la liga.' : '.'} Los cruces aparecerán aquí cuando termine.</p>${inner || ''}</section>`;
+}
 function cupView() {
   const cs = cupState(); if (!cs) return '';
   const now = Date.now();
+  if (cupHidden()) return drawPanel('copa', CUP_DRAW_AT(), `<div class="rows" style="margin-top:10px">${cs.rounds.map(R => `<div class="prow" style="cursor:default;grid-template-columns:1fr auto"><span>${R.name}</span><small class="mute">${fmtKick(R.at)}</small></div>`).join('')}</div>`);
   return `<section class="panel"><div class="comph">${compLogo('copa', 56)}<div><h3>Copa</h3><small class="mute">Temporada ${D.Sx}</small></div></div><p class="small mute">Eliminatoria a partido único entre todos los equipos. Si hay empate, penaltis. Campeón: ${money(12)} y finalista: ${money(5)}. No cansa ni lesiona.</p>
   ${cs.champ != null ? `<div class="champ" style="margin:12px 0">${prizeImg('copa', 110)}<div>${crest(teamByIdx(cs.champ), 48)}<h2>${esc(teamByIdx(cs.champ).name)}, campeón de copa</h2></div></div>` : ''}
   ${cs.rounds.map(R => `<div class="grp">${R.name} · ${fmtKick(R.at)}</div><div class="rows">${R.pairs.map(([h, a]) => {
@@ -392,13 +398,20 @@ async function ensureAiOffers() {
 /* ---------- Champions: los mejores de la liga contra clubes europeos de la IA ---------- */
 const CL_ON = () => !!(D && D.total >= 9);
 const clAt = r => dayAt(3 + 2 * r, CUP_OFF());
+const leagueKicks = () => [...Array(D.total)].map((_, i) => kickAt(i + 1));
+const CL_DRAW_AT = () => E.drawTime(clAt(0), leagueKicks());
+const CUP_DRAW_AT = () => E.drawTime(cupAt(0), leagueKicks());
+const clDrawDoc = () => S.sorteos && S.sorteos['s' + D.Sx + '-cl'];
+// los cruces se ven en el juego cuando acaba el sorteo en directo (o si ya hay partido jugado)
+const cupHidden = () => !S.cup['s' + D.Sx + '-r0'] && Date.now() < CUP_DRAW_AT() + E.DRAW_SHOW;
+const clHidden = () => !S.cl['s' + D.Sx + '-r0'] && Date.now() < CL_DRAW_AT() + E.DRAW_SHOW;
 const CL_PRIZE = { win: 1, final: 8, champ: 20 }, CL_TOK = { win: 1, champ: 10 };
 const teamAvg = t => t.squad.reduce((a, id) => a + ovrOf(id, t), 0) / Math.max(1, t.squad.length);
 function clSetup() {
   if (!CL_ON()) return null;
   if (D._cls) return D._cls;
-  const r0 = S.cl['s' + D.Sx + '-r0'];
-  let qual = r0 && r0.qual, lvl = r0 && r0.lvl, groups = r0 && r0.groups;
+  const r0 = S.cl['s' + D.Sx + '-r0'], sd = clDrawDoc();
+  let qual = (r0 && r0.qual) || (sd && sd.qual), lvl = (r0 && r0.lvl) || (sd && sd.lvl), groups = (r0 && r0.groups) || (sd && sd.groups);
   const q = Math.min(4, Math.floor(D.n / 2));
   if (!qual) {
     // temporada 2+: los primeros de la anterior; temporada 1: equipos de amigos y, si faltan, los más fuertes de la IA
@@ -409,8 +422,8 @@ function clSetup() {
   }
   const eu = E.euroClubs(S.cfg.seed, D.Sx, 8 - qual.length, lvl);
   eu.forEach((t, k) => { t.idx = D.n + k; });
-  if (!groups) { const seeds = [...qual, ...eu.map(t => t.idx)]; groups = [[seeds[0], seeds[3], seeds[4], seeds[7]], [seeds[1], seeds[2], seeds[5], seeds[6]]]; }
-  return (D._cls = { qual, lvl, eu, groups, all: [...D.teams, ...eu], provisional: !r0 });
+  if (!groups) groups = E.clDraw(S.cfg.seed, D.Sx, qual, eu.map(t => t.idx)).groups;
+  return (D._cls = { qual, lvl, eu, groups, all: [...D.teams, ...eu], provisional: !r0 && !sd, drawn: !!(r0 || sd), hidden: clHidden(), drawAt: CL_DRAW_AT() });
 }
 function clState() {
   const st = clSetup(); if (!st) return null;
@@ -444,6 +457,10 @@ function clTokens(i) {
 }
 async function clTick() {
   const cs = clState(); if (!cs) return false;
+  if (!cs.drawn && Date.now() >= cs.drawAt + 2 * 60000) {
+    const ref = S.db.doc('sorteos/s' + D.Sx + '-cl');
+    if (!(await ref.get()).data()) { await ref.set({ qual: cs.qual, lvl: cs.lvl, groups: cs.groups, at: cs.drawAt, by: 'app' }); S.sorteos = { ...(S.sorteos || {}), ['s' + D.Sx + '-cl']: { qual: cs.qual, lvl: cs.lvl, groups: cs.groups } }; D._cls = D._clst = null; return true; }
+  }
   for (const R of cs.rounds) {
     if (R.doc) continue;
     if (!R.ready || R.at > Date.now() || R.pairs.some(p => p[0] === undefined)) return false;
@@ -467,6 +484,10 @@ function clMatchRow(R, h, a, k) {
 function clView() {
   if (!CL_ON()) return `<section class="panel"><h3>Champions</h3><p class="mute">Con tan pocos equipos la temporada es demasiado corta para la Champions. Se juega en ligas de 6 equipos o más.</p></section>`;
   const cs = clState(), ours = new Set(cs.qual);
+  if (clHidden()) {
+    const pot = (ids, t) => `<div class="grp">${t}</div><div class="rows">${ids.map(i => { const x = teamByIdx(i); return `<div class="prow" style="cursor:default;grid-template-columns:auto 1fr">${crest(x, 24)}<span>${esc(x.name)}${D.my && i === D.myIdx ? ' <small class="mute">(tú)</small>' : ''}</span></div>`; }).join('')}</div>`;
+    return drawPanel('champions', cs.drawAt, `<p class="small mute" style="margin-top:6px">Dos grupos de 4. Los ganadores juegan la final.${cs.provisional ? ' Los clasificados de tu liga se cierran en el sorteo.' : ''}</p>${pot(cs.qual, 'Bombo 1 · tu liga')}${pot(cs.eu.map(t => t.idx), 'Bombo 2 · Europa')}`);
+  }
   const tableHTML = (g, rows, gi) => `<section class="panel"><h3>Grupo ${'AB'[gi]}</h3><div class="scroll"><table><thead><tr><th>#</th><th>Equipo</th><th>PJ</th><th>DG</th><th>Pts</th></tr></thead><tbody>${rows.map((r, i) => { const t = teamByIdx(r.t); return `<tr class="${D.my && r.t === D.myIdx ? 'me' : ''}"><td>${i + 1}</td><td><span class="tn">${crest(t, 22)}<span>${esc(t.name)}</span>${ours.has(r.t) ? '' : `<span class="tag ia">${esc(t.short)}</span>`}</span></td><td>${r.pj}</td><td>${r.gf - r.gc > 0 ? '+' : ''}${r.gf - r.gc}</td><td>${r.pts}</td></tr>`; }).join('')}</tbody></table></div></section>`;
   const qualTxt = cs.provisional ? 'Clasificados provisionales: se cierran al empezar la primera jornada.' : '';
   let html = `<section class="panel"><div class="comph">${compLogo('champions', 56)}<div><h3>Champions</h3><small class="mute">Temporada ${D.Sx}</small></div></div><ul class="facts"><li>${cs.qual.length} de tu liga + ${cs.eu.length} europeos</li><li>Ganar: +${money(CL_PRIZE.win)} y +${CL_TOK.win} ${IC.gem}</li><li>Campeón: ${money(CL_PRIZE.champ)} y +${CL_TOK.champ} ${IC.gem}</li><li>Finalista: ${money(CL_PRIZE.final)}</li></ul>${qualTxt ? `<p class="small mute">${qualTxt}</p>` : ''}
@@ -480,8 +501,8 @@ function upcoming() {
   if (!D.my) return [];
   const i = D.myIdx, out = [], now = Date.now();
   for (let md = Math.max(D.nextMd, D.revealed.length + 1); md <= D.total && out.length < 2; md++) { const p = D.fx[md - 1]?.find(([h, a]) => h === i || a === i); if (p && kickAt(md) + LIVE > now) out.push({ c: 'Liga', at: kickAt(md), h: p[0], a: p[1], tag: 'J' + md }); }
-  const cup = cupState(); if (cup) for (const R of cup.rounds) { const p = R.pairs.find(x => x && (x[0] === i || x[1] === i)); if (p && p[0] != null && p[1] != null && p[0] !== undefined && p[1] !== undefined && !R.revealed) { out.push({ c: 'Copa', at: R.at, h: p[0], a: p[1], tag: R.name }); break; } }
-  const cl = clState(); if (cl && cl.qual.includes(i)) for (const R of cl.rounds) { const p = R.pairs.find(x => x[0] === i || x[1] === i); if (p && !R.revealed) { out.push({ c: 'Champions', at: R.at, h: p[0], a: p[1], tag: R.r < 3 ? 'Grupos' : 'Final' }); break; } }
+  const cup = cupHidden() ? null : cupState(); if (cup) for (const R of cup.rounds) { const p = R.pairs.find(x => x && (x[0] === i || x[1] === i)); if (p && p[0] != null && p[1] != null && p[0] !== undefined && p[1] !== undefined && !R.revealed) { out.push({ c: 'Copa', at: R.at, h: p[0], a: p[1], tag: R.name }); break; } }
+  const cl = clState(); if (cl && !clHidden() && cl.qual.includes(i)) for (const R of cl.rounds) { const p = R.pairs.find(x => x[0] === i || x[1] === i); if (p && !R.revealed) { out.push({ c: 'Champions', at: R.at, h: p[0], a: p[1], tag: R.r < 3 ? 'Grupos' : 'Final' }); break; } }
   return out.sort((x, y) => x.at - y.at);
 }
 function upcomingHTML() {
@@ -932,7 +953,7 @@ function webPanel() {
 const TG_BOT = 'LigaDeAmigosRifiBot';
 function tgPanel() {
   const w = WEB(); if (!w) return '';
-  return `<section class="panel"><h3>Avisos por Telegram</h3><p class="small mute">El bot avisa 10 minutos antes de cada partido (liga, copa y Champions), manda los resultados con goleadores y la clasificación, las ofertas por vuestros jugadores y lo que escribáis en el muro. Y pica: comenta cada jornada, hace la previa de los derbis y trae noticias cada mañana.</p>
+  return `<section class="panel"><h3>Avisos por Telegram</h3><p class="small mute">El bot avisa 10 minutos antes de cada partido (liga, copa y Champions), manda los resultados con goleadores y la clasificación, las ofertas por vuestros jugadores y lo que escribáis en el muro. Y pica: comenta cada jornada, hace la previa de los derbis, retransmite en directo los sorteos de Copa y Champions y trae noticias cada mañana.</p>
   <ol class="small" style="margin:8px 0 10px 18px;line-height:1.6"><li>Crea un grupo de Telegram con tus amigos (o usa uno que ya tengáis).</li><li>Añade a <b>@${TG_BOT}</b> al grupo.</li><li>En el grupo escribe: <code>/vincular ${esc(w.code)}</code></li></ol>
   <div style="display:flex;gap:8px;flex-wrap:wrap"><a class="btn y" href="https://t.me/${TG_BOT}?startgroup=liga" target="_blank" rel="noopener">Añadir el bot a un grupo</a><button class="btn ghost" data-act="tgcopy">Copiar /vincular ${esc(w.code)}</button></div></section>`;
 }
@@ -1236,6 +1257,7 @@ setInterval(tick, 20000);
   db.collection('subastas').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.pid) o[d.id] = x; }); S.auctions = o; changed(); }, e => console.warn(e));
   db.collection('muro').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.txt) o[d.id] = x; }); S.muro = o; changed(); }, e => console.warn(e));
   db.collection('champions').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.m) o[d.id] = x; }); S.clRaw = o; changed(); }, e => console.warn(e));
+  db.collection('sorteos').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.groups) o[d.id] = x; }); S.sorteos = o; if (D) D._cls = D._clst = null; changed(); }, e => console.warn(e));
   db.collection('copa').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.m) o[d.id] = x; }); S.cupRaw = o; changed(); }, e => console.warn(e));
   db.collection('vivo').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.sl) o[d.id] = x; }); S.vivo = o; changed(); }, e => console.warn(e));
   db.collection('presencia').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.t) o[d.id] = x; }); S.pres = o; }, e => console.warn(e));
