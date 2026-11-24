@@ -64,7 +64,7 @@ function makeUser(code, liga) {
 const gate = document.createElement('div'); gate.className = 'gate'; gate.setAttribute('role', 'dialog'); gate.setAttribute('aria-modal', 'true');
 document.body.appendChild(gate); document.body.classList.add('gated');
 let msg = '', busy = false, mode = 'start';
-const host = location.host || 'liga-de-amigos-xlwp.netlify.app';
+const host = location.host || "169-58-150-135.sslip.io";
 const urlCode = cleanCode(new URLSearchParams(location.search).get('liga'));
 function show(html) { gate.innerHTML = `<div class="gate-card"><div class="gate-head"><img src="img/comp/liga.webp" alt="" width="64" height="64"><div><h1>Liga de Amigos</h1><p>Tu liga de fútbol con tus amigos. La IA rellena el resto.</p></div></div>${html}${msg ? `<p class="gate-msg" role="alert">${esc(msg)}</p>` : ''}</div>`; const f = gate.querySelector('input,button.btn.y'); f && f.focus(); }
 const authErr = e => {
