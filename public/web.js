@@ -5,7 +5,14 @@ import { getAuth, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signI
 import { getFirestore, doc, getDoc, setDoc, deleteDoc, collection, getDocs, onSnapshot, runTransaction, serverTimestamp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js';
 import { FIREBASE_CONFIG } from './firebase-config.js';
 
-const app = initializeApp(FIREBASE_CONFIG), auth = getAuth(app), fs = getFirestore(app);
+// En nuestro dominio, el inicio de sesión de Google pasa por /__/auth/ del propio dominio (el servidor lo reenvía a Firebase):
+// así funciona en móviles, que bloquean las cookies de otros dominios.
+const SAME_ORIGIN_AUTH = /(^|\.)169-58-150-135\.sslip\.io$/.test(location.hostname);
+const CFG = SAME_ORIGIN_AUTH ? { ...FIREBASE_CONFIG, authDomain: location.host } : FIREBASE_CONFIG;
+const UA = navigator.userAgent || '';
+const IN_APP = /FBAN|FBAV|Instagram|Line\/|Telegram|WhatsApp|Snapchat|TikTok|musical_ly|; wv\)/i.test(UA);
+const MOBILE = /Android|iPhone|iPad|iPod/i.test(UA) || (navigator.maxTouchPoints > 1 && /Macintosh/.test(UA));
+const app = initializeApp(CFG), auth = getAuth(app), fs = getFirestore(app);
 setPersistence(auth, browserLocalPersistence).catch(() => {});
 const LS = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) {} } };
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -71,6 +78,7 @@ const authErr = e => {
   const c = e && e.code || '';
   if (c.includes('unauthorized-domain')) return 'Este dominio aún no está autorizado para entrar con Google. Usa email y contraseña mientras tanto.';
   if (c.includes('popup-closed') || c.includes('cancelled')) return '';
+  if (c.includes('disallowed') || c.includes('web-storage') || c.includes('operation-not-supported')) return 'Este navegador no deja iniciar sesión con Google. Abre la web en Chrome o Safari, o entra con email.';
   if (c.includes('invalid-credential') || c.includes('wrong-password') || c.includes('user-not-found')) return 'Email o contraseña incorrectos.';
   if (c.includes('email-already-in-use')) return 'Ese email ya tiene cuenta: pulsa «Entrar».';
   if (c.includes('weak-password')) return 'La contraseña necesita al menos 6 caracteres.';
@@ -78,8 +86,14 @@ const authErr = e => {
   if (c.includes('network')) return 'Sin conexión. Revisa internet y vuelve a probar.';
   return 'No se ha podido entrar (' + (c || 'error') + ').';
 };
+function inAppNote() {
+  if (!IN_APP) return '';
+  const android = /Android/i.test(UA), url = location.href.replace(/^https?:\/\//, '');
+  return `<div class="gate-msg" role="note" style="margin-bottom:12px">Estás dentro del navegador de una app (Telegram, WhatsApp…). Google no deja iniciar sesión aquí.
+  ${android ? `<a class="btn sm y" style="margin-top:8px;display:inline-block" href="intent://${esc(url)}#Intent;scheme=https;package=com.android.chrome;end">Abrir en Chrome</a>` : '<br>Pulsa <b>⋯</b> o el icono de compartir y elige <b>Abrir en Safari</b>.'}<br><span class="small">O entra con email y contraseña.</span></div>`;
+}
 function loginView() {
-  show(`<button class="btn y gate-google" data-g="google">Entrar con Google</button>
+  show(`${inAppNote()}<button class="btn y gate-google" data-g="google">Entrar con Google</button>
   <div class="gate-or"><span>o con email</span></div>
   <form data-g="email" class="gate-form"><label class="f">Email<input type="email" id="g-email" autocomplete="email" required></label>
   <label class="f">Contraseña<input type="password" id="g-pass" autocomplete="current-password" minlength="6" required></label>
@@ -139,7 +153,11 @@ gate.addEventListener('click', async e => {
   const g = b.dataset.g; msg = '';
   try {
     busy = true;
-    if (g === 'google') { try { await signInWithPopup(auth, new GoogleAuthProvider()); } catch (err) { if (String(err.code).includes('popup-blocked')) await signInWithRedirect(auth, new GoogleAuthProvider()); else throw err; } }
+    if (g === 'google') {
+      const pv = new GoogleAuthProvider(); pv.setCustomParameters({ prompt: 'select_account' });
+      if (MOBILE && SAME_ORIGIN_AUTH) { b.textContent = 'Abriendo Google…'; await signInWithRedirect(auth, pv); return; }
+      try { await signInWithPopup(auth, pv); } catch (err) { if (/popup-blocked|operation-not-supported|web-storage/.test(String(err.code))) await signInWithRedirect(auth, pv); else throw err; }
+    }
     if (g === 'toggle') { mode = mode === 'signup' ? 'login' : 'signup'; loginView(); }
     if (g === 'logout') { await signOut(auth); }
     if (g === 'open') await enter(b.dataset.code);

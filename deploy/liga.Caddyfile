@@ -1,0 +1,17 @@
+# Contenedor liga-web: sirve el juego y reenvía /__/ (inicio de sesión de Google) a Firebase.
+{
+	admin off
+	auto_https off
+}
+:80 {
+	encode gzip
+	handle /__/* {
+		reverse_proxy https://liga-de-amigos-rifi.firebaseapp.com {
+			header_up Host {upstream_hostport}
+		}
+	}
+	handle {
+		root * /srv
+		file_server
+	}
+}
