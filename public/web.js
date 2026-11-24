@@ -7,7 +7,8 @@ import { FIREBASE_CONFIG } from './firebase-config.js';
 
 // En nuestro dominio, el inicio de sesión de Google pasa por /__/auth/ del propio dominio (el servidor lo reenvía a Firebase):
 // así funciona en móviles, que bloquean las cookies de otros dominios.
-const SAME_ORIGIN_AUTH = /(^|\.)169-58-150-135\.sslip\.io$/.test(location.hostname);
+// Se activa cuando el VPS reenvía /__/auth/ (deploy/w.sh). Mientras tanto, el login va por firebaseapp.com.
+const SAME_ORIGIN_AUTH = false;
 const CFG = SAME_ORIGIN_AUTH ? { ...FIREBASE_CONFIG, authDomain: location.host } : FIREBASE_CONFIG;
 const UA = navigator.userAgent || '';
 const IN_APP = /FBAN|FBAV|Instagram|Line\/|Telegram|WhatsApp|Snapchat|TikTok|musical_ly|; wv\)/i.test(UA);
