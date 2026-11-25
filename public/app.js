@@ -53,10 +53,14 @@ const NAV = {
   mercado: DUO('<path d="M4 8.5h13.5"/><path d="m14 5 3.5 3.5L14 12"/><path d="M20 15.5H6.5"/><path d="m10 12-3.5 3.5L10 19"/>'),
   club: DUO('<path d="M12 3 4.5 5.8v6c0 4.4 3.1 7.6 7.5 9.2 4.4-1.6 7.5-4.8 7.5-9.2v-6z" fill="currentColor" fill-opacity=".22"/><path d="M12 3v18M4.6 11h14.8"/>')
 };
+/* iconos 3D de las pestañas y secciones (generados con IA, en img/ui) */
+const SUBI = { xi: 'ui/pizarra', squad: 'ui/nav-equipo', train: 'ruleta/r9', tabla: 'ui/nav-liga', jornadas: 'ui/calendario', copa: 'comp/copa', champions: 'comp/champions', muro: 'ui/megafono', goles: 'premios/bota', clubes: 'ui/nav-club', subastas: 'ui/mazo', sobres: 'ui/sobre-oro', libres: 'ui/prismaticos', equipos: 'ui/nav-mercado', ofertas: 'ui/apreton', eco: 'ui/finanzas', inst: 'ui/grua', vit: 'ui/vitrina', tok: 'ruleta/r5', club: 'ui/nav-club' };
+const subI = k => SUBI[k] ? `<img class="si" src="img/${SUBI[k]}.webp" alt="" aria-hidden="true">` : '';
+const hI = n => `<img class="hi" src="img/ui/${n}.webp" alt="" aria-hidden="true">`;
 /* iconos propios: gema de tokens y moneda de euro, dibujados a mano */
 const IC = {
-  gem: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 3.5h10.8L21.5 9 12 21 2.5 9z" fill="#1aa85a"/><path d="M2.5 9h19L12 21z" fill="#0e7c41"/><path d="M6.6 3.5 8.7 9h6.6l2.1-5.5z" fill="#6ef0a2"/><path d="M8.7 9 12 21l3.3-12z" fill="#22c46b"/><path d="M6.6 3.5 2.5 9h6.2zM17.4 3.5 21.5 9h-6.2z" fill="#3ddc84"/><path d="M6.6 3.5h10.8L21.5 9 12 21 2.5 9z" fill="none" stroke="#052e17" stroke-width="1.1" stroke-linejoin="round"/><path d="M9 5.2h3" stroke="#e6fff0" stroke-width="1.3" stroke-linecap="round"/></svg>',
-  coin: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="13.6" rx="9" ry="8.4" fill="#a85f00"/><ellipse cx="12" cy="12" rx="9" ry="8.4" fill="#ffc23d"/><ellipse cx="12" cy="12" rx="6.6" ry="6.1" fill="#f5a20c"/><path d="M14.6 8.9a3.6 3.6 0 1 0 0 6.2M8.3 11h4.6M8.3 13.1h4.6" fill="none" stroke="#fff3c4" stroke-width="1.6" stroke-linecap="round"/><path d="M12 3.6a9 8.4 0 0 1 8.2 5" fill="none" stroke="#fff3c4" stroke-width="1" stroke-linecap="round" opacity=".7"/></svg>',
+  gem: '<img class="ic ic3" src="img/ruleta/r5.webp" alt="" aria-hidden="true">',
+  coin: '<img class="ic ic3" src="img/ruleta/r3.webp" alt="" aria-hidden="true">',
   play: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/></svg>',
   x: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
   med: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4" fill="#ec4d55"/><path d="M12 7v10M7 12h10" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>',
@@ -384,7 +388,7 @@ function objectiveHTML() {
   if (!D.my) return '';
   const o = objective(D.myIdx, D.Sx);
   const st = o.done ? (o.met ? `<b class="pos-amt">¡Cumplido!</b> +${money(OBJ_PRIZE.cash)} y +${OBJ_PRIZE.tok} tokens` : '<b class="neg-amt">No cumplido</b>. La directiva espera más la próxima temporada.') : o.pos ? `Vas ${o.pos}º · ${o.onTrack ? '<b class="pos-amt">dentro del objetivo</b>' : '<b class="neg-amt">fuera del objetivo</b>'}` : 'Empieza la temporada.';
-  return `<section class="panel obj">${prizeImg('medalla', 64)}<div><h3>Objetivo de la directiva</h3><p class="objt">${o.txt}</p><p class="small mute">${st}${o.done ? '' : ` · Premio: ${money(OBJ_PRIZE.cash)} y ${OBJ_PRIZE.tok} ${IC.gem}`}</p></div></section>`;
+  return `<section class="panel obj">${prizeImg('medalla', 64)}<div><h3>${hI('diana')}Objetivo de la directiva</h3><p class="objt">${o.txt}</p><p class="small mute">${st}${o.done ? '' : ` · Premio: ${money(OBJ_PRIZE.cash)} y ${OBJ_PRIZE.tok} ${IC.gem}`}</p></div></section>`;
 }
 /* prensa de la liga: noticias que publica el bot (imágenes de los medios ficticios y crónicas en texto) */
 const agoTxt = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'ahora' : m < 60 ? 'hace ' + m + ' min' : m < 1440 ? 'hace ' + Math.round(m / 60) + ' h' : 'hace ' + Math.round(m / 1440) + ' d'; };
@@ -394,14 +398,14 @@ function prensaHTML() {
   const item = x => x.img
     ? `<button class="prensa-it" data-act="noticia" data-arg="${esc(x.id)}"><img src="${esc(x.img)}" alt="${esc(x.caption || 'Noticia')}" loading="lazy"><span><b>${esc(x.caption || '')}</b><small class="mute">${agoTxt(x.t)}</small></span></button>`
     : `<button class="prensa-it txt" data-act="noticia" data-arg="${esc(x.id)}"><span><b>${esc(x.caption || 'Crónica')}</b><small class="mute">${agoTxt(x.t)}</small><p>${esc(String(x.text || '').slice(0, 220))}${String(x.text || '').length > 220 ? '…' : ''}</p></span></button>`;
-  return `<section class="panel"><div class="ph"><h3>Prensa de la liga</h3><small class="mute">${list.length ? list.length + ' noticias' : ''}</small></div>
+  return `<section class="panel"><div class="ph"><h3>${hI('periodico')}Prensa de la liga</h3><small class="mute">${list.length ? list.length + ' noticias' : ''}</small></div>
   ${list.length ? `<div class="prensa" tabindex="0" aria-label="Noticias recientes">${list.map(item).join('')}</div>` : '<p class="mute small">Aquí saldrán las portadas, rumores y crónicas de la liga. Las publica el bot cuando la liga está vinculada a vuestro grupo de Telegram (Club → Avisos por Telegram).</p>'}</section>`;
 }
 /* muro de la liga: mensajes cortos entre los amigos */
 function muroHTML(limit) {
   const msgs = Object.values(S.muro || {}).sort((a, b) => b.t - a.t).slice(0, limit);
   const ago = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'ahora' : m < 60 ? 'hace ' + m + ' min' : m < 1440 ? 'hace ' + Math.round(m / 60) + ' h' : 'hace ' + Math.round(m / 1440) + ' d'; };
-  return `<section class="panel"><div class="ph"><h3>Muro de la liga</h3>${limit < 50 ? '<button class="btn sm ghost" data-act="go" data-arg="liga:muro">Ver todo</button>' : ''}</div>
+  return `<section class="panel"><div class="ph"><h3>${hI('megafono')}Muro de la liga</h3>${limit < 50 ? '<button class="btn sm ghost" data-act="go" data-arg="liga:muro">Ver todo</button>' : ''}</div>
   ${S.canWrite && D.my ? `<div class="muro-f"><input type="text" id="muro-txt" maxlength="180" placeholder="Pica a tus amigos…" aria-label="Mensaje"><button class="btn sm y" data-act="muro">Enviar</button></div>` : ''}
   <ul class="muro">${msgs.map(x => { const t = S.teams[x.team]; return `<li>${t ? crest(t, 30) : ''}<div><b>${esc(t ? t.name : 'Míster')}</b> <small class="mute">${ago(x.t)}</small><p>${esc(x.txt)}</p></div></li>`; }).join('') || '<li class="mute small">Nadie ha escrito todavía. Rompe el hielo.</li>'}</ul></section>`;
 }
@@ -618,10 +622,7 @@ const zig = (n, h) => { const pts = []; for (let i = 0; i <= n; i++) pts.push(`$
 const PACK_CLIP = zig(22, 7);
 function packArt(kind, big) {
   const P = PACKS[kind];
-  return `<div class="pack pack-${kind}${big ? ' big' : ''}" style="clip-path:${PACK_CLIP}"><div class="pack-in">
-    <span class="pack-top">LIGA DE AMIGOS</span>
-    <svg class="pack-crest" viewBox="0 0 64 72" aria-hidden="true"><path d="M32 2L60 11V36C60 54 47 65 32 70C17 65 4 54 4 36V11Z" fill="rgba(0,0,0,.18)" stroke="rgba(255,255,255,.7)" stroke-width="2"/><circle cx="32" cy="35" r="13" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="2.5"/><path d="M32 26l6 4.5-2.3 7h-7.4L26 30.5z" fill="rgba(255,255,255,.85)"/></svg>
-    <b class="pack-name">${P.name.replace('Sobre ', '')}</b><span class="pack-n">${P.n} ${P.n > 1 ? 'premios' : 'premio'}</span></div></div>`;
+  return `<div class="pack pack-img pack-${kind}${big ? ' big' : ''}"><img src="img/ui/sobre-${kind}.webp" alt="${P.name}" draggable="false"></div>`;
 }
 const rarity = o => o >= 86 ? 'crack' : o >= 80 ? 'oro' : o >= 75 ? 'plata' : 'bronce';
 function prizeCard(x) {
@@ -820,7 +821,7 @@ function header() {
   const my = D?.my, cash = my ? D.fin(D.myIdx).cash : null;
   const title = my ? `<span>${crest(my, 38)}</span><span><b>${esc(my.name)}</b><small>${esc(S.cfg.name)} · T${D.Sx} · J${Math.min(D.revealed.length + (D.live.length ? 1 : 0), D.total)}/${D.total}</small></span>` : `<span><b>${esc(S.cfg?.name || 'Liga de Amigos')}</b><small>${D ? 'Temporada ' + D.Sx + ' · ' + D.n + ' equipos' : 'Fútbol manager entre amigos'}</small></span>`;
   const vales = D && D.my ? Object.values((D.my.packs || {}).vale || {}).reduce((a, n) => a + (n > 0 ? n : 0), 0) : 0, nRul = D && D.my && rulState(D.my).freeOk ? 1 : 0;
-  const nAuc = newAuctions() + vales + (D && D.my && packState(D.my).freeOk ? 1 : 0), tabs = D ? `<nav class="tabs">${[['inicio', 'Inicio'], ['equipo', 'Equipo'], ['liga', 'Liga'], ['mercado', 'Mercado'], ['club', 'Club']].map(([k, l]) => `<button data-act="view" data-arg="${k}" aria-current="${S.view === k}">${NAV[k]}${l}${k === 'mercado' && nAuc ? `<span class="nbadge" aria-label="${nAuc} subastas nuevas">${nAuc}</span>` : ''}${k === 'inicio' && nRul ? '<span class="nbadge" aria-label="Tirada gratis en la ruleta">1</span>' : ''}</button>`).join('')}</nav>` : '';
+  const nAuc = newAuctions() + vales + (D && D.my && packState(D.my).freeOk ? 1 : 0), tabs = D ? `<nav class="tabs">${[['inicio', 'Inicio'], ['equipo', 'Equipo'], ['liga', 'Liga'], ['mercado', 'Mercado'], ['club', 'Club']].map(([k, l]) => `<button data-act="view" data-arg="${k}" aria-current="${S.view === k}"><img class="nv" src="img/ui/nav-${k}.webp" alt="" aria-hidden="true">${l}${k === 'mercado' && nAuc ? `<span class="nbadge" aria-label="${nAuc} subastas nuevas">${nAuc}</span>` : ''}${k === 'inicio' && nRul ? '<span class="nbadge" aria-label="Tirada gratis en la ruleta">1</span>' : ''}</button>`).join('')}</nav>` : '';
   return `<header class="top"><div class="row"><div class="club">${title}</div>${cash != null ? `<button class="tokchip" data-act="go" data-arg="club:tok" aria-label="Tokens: ${D.tok(D.myIdx)}">${IC.gem}${D.tok(D.myIdx)}</button><div class="cash ${cash < 0 ? 'neg' : ''}" aria-label="Caja">${IC.coin}${money(cash)}</div>` : ''}</div>${tabs}</header>`;
 }
 function body() {
@@ -952,7 +953,7 @@ async function claim(id) {
 function teamView() {
   if (!D.my) return pickTeamView();
   const subs = [['xi', 'Alineación'], ['squad', 'Plantilla'], ['train', 'Entreno']];
-  return `<div class="sub">${subs.map(([k, l]) => `<button data-act="sub" data-arg="${k}" aria-pressed="${S.sub === k}">${l}</button>`).join('')}</div>` + (S.sub === 'squad' ? squadView() : S.sub === 'train' ? trainView() : lineupView());
+  return `<div class="sub">${subs.map(([k, l]) => `<button data-act="sub" data-arg="${k}" aria-pressed="${S.sub === k}">${subI(k)}${l}</button>`).join('')}</div>` + (S.sub === 'squad' ? squadView() : S.sub === 'train' ? trainView() : lineupView());
 }
 function ensureLin() {
   const t = D.my, ctx = D.ctx(t);
@@ -1076,7 +1077,7 @@ function matchRow(m, doc, k) {
 }
 function leagueView() {
   const subs = [['tabla', 'Tabla'], ['jornadas', 'Jornadas'], ['copa', 'Copa'], ['champions', 'Champions'], ['muro', 'Muro'], ['goles', 'Goleadores'], ['clubes', 'Clubes']];
-  let html = `<div class="sub">${subs.map(([k, l]) => `<button data-act="lsub" data-arg="${k}" aria-pressed="${S.lsub === k}">${l}</button>`).join('')}</div>`;
+  let html = `<div class="sub">${subs.map(([k, l]) => `<button data-act="lsub" data-arg="${k}" aria-pressed="${S.lsub === k}">${subI(k)}${l}</button>`).join('')}</div>`;
   if (S.lsub === 'jornadas') {
     const md = S.mdSel = S.mdSel || Math.min(D.total, Math.max(1, D.live.length ? D.live[0].md : D.revealed.length + (D.done ? 0 : 1)));
     const doc = D.cur.find(d => d.md === md);
@@ -1112,7 +1113,7 @@ function marketView() {
   if (!D.my) return pickTeamView();
   if (S.msub === 'subastas') { try { localStorage.setItem('aucSeen', Date.now()); } catch (e) {} }
   const subs = [['subastas', 'Subastas'], ['sobres', 'Sobres' + (packState(D.my).freeOk ? ' •' : '')], ['libres', 'Libres'], ['equipos', 'Rivales'], ['ofertas', 'Ofertas']];
-  let html = `<div class="sub">${subs.map(([k, l]) => `<button data-act="msub" data-arg="${k}" aria-pressed="${S.msub === k}">${l}</button>`).join('')}</div>`;
+  let html = `<div class="sub">${subs.map(([k, l]) => `<button data-act="msub" data-arg="${k}" aria-pressed="${S.msub === k}">${subI(k)}${l}</button>`).join('')}</div>`;
   if (S.msub === 'sobres') {
     html += packsView();
   } else if (S.msub === 'subastas') {
@@ -1144,7 +1145,7 @@ function clubView() {
   const t = D.my, f = D.fin(D.myIdx), lvl = E.stLvl(t), nextL = E.STADIUM[(t.stadium || 0) + 1], tok = D.tok(D.myIdx), fans = D.fans(D.myIdx);
   const sub = S.csub || 'eco';
   const subs = [['eco', 'Finanzas'], ['inst', 'Estadio'], ['vit', 'Vitrina'], ['tok', 'Tokens'], ['club', 'Mi club']];
-  let html = `<div class="sub">${subs.map(([k, l]) => `<button data-act="csub" data-arg="${k}" aria-pressed="${sub === k}">${l}</button>`).join('')}</div>`;
+  let html = `<div class="sub">${subs.map(([k, l]) => `<button data-act="csub" data-arg="${k}" aria-pressed="${sub === k}">${subI(k)}${l}</button>`).join('')}</div>`;
   if (sub === 'eco') {
     const led = (t.ledger || []).slice(-8).reverse();
     const lastHome = [...D.all].reverse().map(d => d.m.find(m => m.h === D.myIdx)).find(Boolean);
@@ -1178,7 +1179,7 @@ function clubView() {
   } else if (sub === 'tok') {
     const d = t.daily || {}, todayK = today(), claimed = d.d === todayK, streak = d.d === yesterday() ? (d.streak || 0) + 1 : 1;
     const shop = [['Forma al 100%', '2 ' + IC.gem, 'En la ficha del jugador'], ['Curar una lesión', '4 ' + IC.gem, 'En la ficha del jugador'], ['Entreno extra', '2 ' + IC.gem, 'En Equipo · Entreno'], ['Ojeador premium', '3 ' + IC.gem, 'En Club · Mi club'], ['Terminar obras', '2 ' + IC.gem + ' / 12 h', 'En Club · Estadio']];
-    html += `<div class="grid"><section class="panel"><div class="ph"><h3>Tus tokens</h3><span class="big">${tok}</span></div><ul class="facts"><li>+2 por victoria</li><li>+1 por empate</li><li>+20 por ganar la liga</li><li>Premio diario</li></ul>
+    html += `<div class="grid"><section class="panel"><div class="ph"><h3>${hI('cofre')}Tus tokens</h3><span class="big">${tok}</span></div><ul class="facts"><li>+2 por victoria</li><li>+1 por empate</li><li>+20 por ganar la liga</li><li>Premio diario</li></ul>
     <button class="btn y" data-act="daily" ${claimed ? 'disabled' : ''}>${claimed ? 'Premio de hoy recogido' : `Recoger premio diario · +${Math.min(5, streak)}`}</button>${!claimed && streak > 1 ? `<p class="small mute">Racha de ${streak} días seguidos.</p>` : ''}</section>
     <section class="panel"><h3>En qué gastarlos</h3><ul class="ledger">${shop.map(([a, b2, c]) => `<li><span><b>${a}</b><br><span class="small mute">${c}</span></span><b class="tk">${b2}</b></li>`).join('')}</ul></section></div>`;
   } else {
