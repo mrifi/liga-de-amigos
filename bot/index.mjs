@@ -95,12 +95,13 @@ const dec = d => { if (!d) return d; const o = {}; for (const k in d) { const v 
 const L = {}; // code -> { cfg, teams, jor, cup, cl, chat, unsub[] , ready }
 function watch(code) {
   if (L[code]) return;
-  const lg = L[code] = { code, cfg: null, teams: {}, jor: {}, cup: {}, cl: {}, mem: {}, sorteos: {}, unsub: [], boot: Date.now() };
+  const lg = L[code] = { code, cfg: null, teams: {}, jor: {}, cup: {}, cl: {}, mem: {}, sorteos: {}, auc: {}, aucPrev: {}, unsub: [], boot: Date.now() };
   const P = 'ligas/' + code + '/';
   const col = (name, fn) => lg.unsub.push(onSnapshot(collection(db, P + name), q => fn(q), e => console.warn(code, name, e.code)));
   lg.unsub.push(onSnapshot(doc(db, P + 'liga/config'), s => { lg.cfg = s.exists() ? dec(s.data()) : null; }, e => console.warn(code, 'cfg', e.code)));
   col('equipos', q => { q.docs.forEach(d => { lg.teams[d.id] = dec(d.data()); }); ledgerNews(lg); });
   col('sorteos', q => q.docs.forEach(d => { lg.sorteos[d.id] = dec(d.data()); }));
+  col('subastas', q => { q.docs.forEach(d => { lg.auc[d.id] = dec(d.data()); }); q.docChanges().forEach(ch => aucNews(lg, ch.type, ch.doc.id, dec(ch.doc.data()))); });
   col('miembros', q => q.docs.forEach(d => { lg.mem[d.id] = d.data(); }));
   const store = (k, name) => col(name, q => {
     q.docs.forEach(d => { lg[k][d.id] = dec(d.data()); });
@@ -517,6 +518,39 @@ async function setGroqKey(msg, raw) {
   if (ok === false) return send(chat, '❌ Groq dice que esa clave no es válida. Revisa que la has copiado entera.');
   ST.groq = raw; ST.groqOwner = from; save(); setAIKey(raw);
   send(chat, `✅ Clave guardada${ok ? ' y comprobada' : ''}. He borrado tu mensaje. Ya escribo las noticias con IA.\nPrueba <code>/noticia</code> en el grupo.`);
+}
+
+
+/* ---------- subastas ---------- */
+const AUC_TAG = { estrella: '⭐ Crack', titular: 'Titular', joven: '🌱 Promesa', veterano: 'Veterano', ganga: '💸 Ganga', ia: '🤖 Vende la IA' };
+const durTxt = m => m >= 60 ? (m / 60) + ' h' : m + ' min';
+function pInfo(lg, a) {
+  const p = E.player(a.pid), t = a.seller ? lg.teams[a.seller] : null;
+  return { p, ovr: E.ovr(a.pid, lg.cfg.season, t?.xp?.[a.pid] || 0), age: E.age(p, lg.cfg.season) };
+}
+function aucNews(lg, type, id, a) {
+  const chat = chatOf(lg.code); if (!chat || !a || !a.pid || !lg.cfg) return;
+  const prev = lg.aucPrev[id]; lg.aucPrev[id] = a;
+  const seller = a.seller ? lg.teams[a.seller] : null, sHum = !!seller?.owner, x = pInfo(lg, a);
+  const fresh = (a.t || 0) > lg.boot - 60000;
+  if (type === 'added' && a.status === 'open' && fresh) {
+    if (sHum) once(lg.code + ':auc:' + id, () => send(chat, `🔨 <b>SUBASTA</b> · ${who(lg, seller.idx)} subasta a <b>${esc(x.p.name)}</b> (${x.p.pos}, ${x.ovr} de media, ${x.age} años)\nPrecio de salida: <b>${fmtM(a.min)}</b> · termina a las <b>${hhmm(a.ends)}</b>${a.mins ? ' (' + durTxt(a.mins) + ')' : ''}\n¡A pujar! ${SITE}`));
+    if (/^auto-.*-0$/.test(id)) once(lg.code + ':mkt:' + id, () => setTimeout(() => {
+      const day = id.replace(/-0$/, '-'), list = Object.entries(lg.auc).filter(([k, v]) => k.startsWith(day) && v.status === 'open').map(([, v]) => v);
+      if (!list.length) return;
+      const lines = list.sort((u, v) => pInfo(lg, v).ovr - pInfo(lg, u).ovr).slice(0, 8).map(v => { const y = pInfo(lg, v); return `• ${AUC_TAG[v.kind] || 'Libre'} · <b>${esc(y.p.name)}</b> ${y.p.pos} ${y.ovr} (${y.age} años) · desde ${fmtM(v.min)}`; });
+      send(chat, `🛒 <b>MERCADO DEL DÍA</b> · ${list.length} subastas hasta las ${hhmm(list[0].ends)}\n\n${lines.join('\n')}\n\nCada puja cuesta 1 token. ${SITE}`);
+    }, 8000));
+  }
+  if (type === 'modified' && prev && a.status === 'open') {
+    const top = b => (b || []).reduce((m, z) => (!m || z.amt > m.amt ? z : m), null), t1 = top(a.bids), t0 = top(prev.bids);
+    if (t1 && t0 && t1.team !== t0.team && lg.teams[t1.team]?.owner && lg.teams[t0.team]?.owner)
+      once(lg.code + ':outbid:' + id + ':' + (a.bids || []).length, () => send(chat, `⚔️ ${who(lg, lg.teams[t1.team].idx)} supera la puja de ${who(lg, lg.teams[t0.team].idx)} por <b>${esc(x.p.name)}</b>: ${fmtM(t1.amt)}. Termina a las ${hhmm(a.ends)}.`));
+  }
+  if (type === 'modified' && prev && prev.status === 'open' && a.status !== 'open' && sHum) {
+    const w = a.winner ? lg.teams[a.winner] : null;
+    once(lg.code + ':aucend:' + id, () => send(chat, w ? `✅ <b>${esc(x.p.name)}</b> se va de ${who(lg, seller.idx)} a ${w.owner ? who(lg, w.idx) : '<b>' + esc(w.name) + '</b> (IA)'} por <b>${fmtM(a.price)}</b>.` : `🤷 Nadie ha pujado por <b>${esc(x.p.name)}</b>. Se queda en ${who(lg, seller.idx)}.`));
+  }
 }
 
 /* ---------- comandos ---------- */

@@ -286,8 +286,22 @@ async function ensureDailyAuctions() {
   const id0 = 'auto-' + today() + '-0'; if (S.auctions[id0]) return;
   const ref = S.db.doc('subastas/' + id0); const l = await ref.acquire({ holder: S.me || 'x', ttlMs: 10000 }); if (!l.acquired) return;
   if ((await ref.get()).data()?.pid) return;
-  const r = E.rng('sub' + today() + S.cfg.seed), free = E.freeAgents(D.owned).sort((a, b) => ovrOf(b) - ovrOf(a)).slice(0, 30).sort(() => r() - .5).slice(0, 3), ends = auctionEnd(Date.now());
-  for (let i = 0; i < free.length; i++) { const pid = free[i]; await S.db.doc('subastas/auto-' + today() + '-' + i).set({ id: 'auto-' + today() + '-' + i, pid, seller: null, min: E.r1(E.pval(pid, D.Sx, 0) * .7), ends, bids: [], status: 'open', t: Date.now() }); }
+  const r = E.rng('sub' + today() + S.cfg.seed), shuf = a => a.map(x => [r(), x]).sort((x, y) => x[0] - y[0]).map(x => x[1]);
+  const pool = E.freeAgents(D.owned).map(id => ({ id, o: ovrOf(id), a: E.age(E.player(id), D.Sx) })), used = new Set(), out = [];
+  const take = (list, n, kind, f = .7) => { let k = 0; for (const x of shuf(list)) { if (k >= n) break; if (used.has(x.id)) continue; used.add(x.id); out.push({ pid: x.id, seller: null, kind, min: E.r1(E.pval(x.id, D.Sx, 0) * f) }); k++; } };
+  const byO = [...pool].sort((a, b) => b.o - a.o);
+  take(byO.slice(0, 40), 2, 'estrella');                                   // 2 cracks
+  take(pool.filter(x => x.o >= 76 && x.o <= 84), 3, 'titular');            // 3 de nivel medio
+  take(pool.filter(x => x.a <= 21).sort((a, b) => b.o - a.o).slice(0, 40), 3, 'joven', .6);   // 3 promesas
+  take(pool.filter(x => x.a >= 31 && x.o >= 78), 1, 'veterano', .5);       // 1 veterano barato
+  take(pool.filter(x => x.o < 76), 1, 'ganga', .5);                        // 1 ganga
+  // 2 jugadores que vende la IA (de su fondo de armario)
+  shuf(D.teams.filter(t => !t.owner && t.squad.length > SQ_MIN && !Object.values(S.auctions).some(x => x.status === 'open' && x.seller === t.id))).slice(0, 2).forEach(t => {
+    const sq = [...t.squad].sort((a, b) => ovrOf(b, t) - ovrOf(a, t)).slice(12).filter(id => !used.has(id)); if (!sq.length) return;
+    const pid = shuf(sq)[0]; used.add(pid); out.push({ pid, seller: t.id, kind: 'ia', min: E.r1(E.pval(pid, D.Sx, t.xp?.[pid] || 0) * .8) });
+  });
+  const ends = auctionEnd(Date.now());
+  for (let i = 0; i < out.length; i++) { const x = out[i], id = 'auto-' + today() + '-' + i; await S.db.doc('subastas/' + id).set({ id, pid: x.pid, seller: x.seller, kind: x.kind, min: x.min, ends, bids: [], status: 'open', t: Date.now() }); }
 }
 const topBid = a => (a.bids || []).reduce((b, x) => (!b || x.amt > b.amt ? x : b), null);
 const nextBid = a => { const tb = topBid(a); return tb ? E.r1(tb.amt + Math.max(.5, tb.amt * .05)) : a.min; };
@@ -568,16 +582,16 @@ function auctionsView() {
   const list = Object.values(S.auctions), open = list.filter(a => a.status === 'open').sort((a, b) => a.ends - b.ends), done = list.filter(a => a.status !== 'open').sort((a, b) => b.ends - a.ends).slice(0, 6);
   const row = a => { const p = E.player(a.pid), tb = topBid(a), lead = tb ? S.teams[tb.team] : null, mine = tb && D.my && tb.team === D.my.id, nb = nextBid(a), seller = a.seller ? S.teams[a.seller] : null;
     return `<div class="auc"><button class="prow" data-act="player" data-arg="${a.pid}"><span class="av">${shirt('#5b6b94', '#ffffff', '', 38)}<span class="pos ${lineOf(p.pos)}">${p.pos}</span></span><span class="pname">${esc(p.name)}<small>${stars(ovrOf(a.pid, seller))} · ${E.age(p, D.Sx)} años · ${seller ? 'Vende ' + esc(seller.name) : 'Agente libre'}</small></span><span class="val">${tb ? money(tb.amt) : 'Salida ' + money(a.min)}</span><span class="ovr">${ovrOf(a.pid, seller)}</span></button>
-    <div class="auc-b"><span class="small ${mine ? 'pos-amt' : 'mute'}">${tb ? (mine ? 'Vas ganando' : 'Gana ' + esc(lead ? lead.name : '?')) : 'Sin pujas'}${aiBids(a).length ? ' · <b class="ai-int">la IA está interesada</b>' : ''} · termina <b data-cd="${a.ends}">${cdText(a.ends)}</b></span>${D.my && (!seller || seller.id !== D.my.id) ? `<button class="btn sm y" data-act="bid" data-arg="${a.id}" ${mine ? 'disabled' : ''}>Pujar ${money(nb)} · 1 ${IC.gem}</button>` : ''}</div></div>`; };
-  return `<div class="grid"><section class="panel"><h3>Subastas abiertas</h3><ul class="facts"><li>3 agentes libres nuevos cada día</li><li>1 ${IC.gem} por puja</li><li>Puja de último minuto: +1 min</li></ul><div class="rows">${open.map(row).join('') || '<p class="mute">No hay subastas abiertas ahora.</p>'}</div></section>
+    <div class="auc-b"><span class="small ${mine ? 'pos-amt' : 'mute'}">${aucTag(a, seller)} ${tb ? (mine ? 'Vas ganando' : 'Gana ' + esc(lead ? lead.name : '?')) : 'Sin pujas'}${aiBids(a).length ? ' · <b class="ai-int">la IA está interesada</b>' : ''} · termina <b data-cd="${a.ends}">${cdText(a.ends)}</b></span>${D.my && (!seller || seller.id !== D.my.id) ? `<button class="btn sm y" data-act="bid" data-arg="${a.id}" ${mine ? 'disabled' : ''}>Pujar ${money(nb)} · 1 ${IC.gem}</button>` : ''}</div></div>`; };
+  return `<div class="grid"><section class="panel"><h3>Subastas abiertas</h3><ul class="facts"><li>Cada día: cracks, titulares, promesas, gangas y jugadores que vende la IA</li><li>1 ${IC.gem} por puja</li><li>Puja de último minuto: +1 min</li></ul><div class="rows">${open.map(row).join('') || '<p class="mute">No hay subastas abiertas ahora.</p>'}</div></section>
   <section class="panel"><h3>Últimas cerradas</h3><ul class="ledger">${done.map(a => `<li><span>${esc(E.player(a.pid).name)}</span><b>${a.winner ? esc(S.teams[a.winner]?.name || '?') + ' · ' + money(a.price) : 'Sin comprador'}</b></li>`).join('') || '<li><span class="mute">Todavía ninguna.</span></li>'}</ul></section></div>`;
 }
-async function auctionMine(pid) {
+async function auctionMine(pid, mins = 30) {
   const t = D.my, v = E.pval(pid, D.Sx, t.xp?.[pid] || 0), min = E.r1(v * .6);
   if (Object.values(S.auctions).some(a => a.pid === pid && a.status === 'open')) return toast('Ya está en subasta');
   const ref = S.db.collection('subastas').doc();
-  await write('subastas/' + ref.id, () => ref.set({ id: ref.id, pid, seller: t.id, min, ends: Date.now() + 30 * 60000, bids: [], status: 'open', t: Date.now() }));
-  S.modal = null; S.view = 'mercado'; S.msub = 'subastas'; toast('En subasta durante 30 minutos'); render();
+  await write('subastas/' + ref.id, () => ref.set({ id: ref.id, pid, seller: t.id, min, mins, ends: Date.now() + mins * 60000, bids: [], status: 'open', t: Date.now() }));
+  S.modal = null; S.view = 'mercado'; S.msub = 'subastas'; toast('En subasta ' + durTxt(mins)); render();
 }
 
 /* ---------- render ---------- */
@@ -592,7 +606,7 @@ function render() {
 function header() {
   const my = D?.my, cash = my ? D.fin(D.myIdx).cash : null;
   const title = my ? `<span>${crest(my, 38)}</span><span><b>${esc(my.name)}</b><small>${esc(S.cfg.name)} · T${D.Sx} · J${Math.min(D.revealed.length + (D.live.length ? 1 : 0), D.total)}/${D.total}</small></span>` : `<span><b>${esc(S.cfg?.name || 'Liga de Amigos')}</b><small>${D ? 'Temporada ' + D.Sx + ' · ' + D.n + ' equipos' : 'Fútbol manager entre amigos'}</small></span>`;
-  const tabs = D ? `<nav class="tabs">${[['inicio', 'Inicio'], ['equipo', 'Equipo'], ['liga', 'Liga'], ['mercado', 'Mercado'], ['club', 'Club']].map(([k, l]) => `<button data-act="view" data-arg="${k}" aria-current="${S.view === k}">${NAV[k]}${l}</button>`).join('')}</nav>` : '';
+  const nAuc = newAuctions(), tabs = D ? `<nav class="tabs">${[['inicio', 'Inicio'], ['equipo', 'Equipo'], ['liga', 'Liga'], ['mercado', 'Mercado'], ['club', 'Club']].map(([k, l]) => `<button data-act="view" data-arg="${k}" aria-current="${S.view === k}">${NAV[k]}${l}${k === 'mercado' && nAuc ? `<span class="nbadge" aria-label="${nAuc} subastas nuevas">${nAuc}</span>` : ''}</button>`).join('')}</nav>` : '';
   return `<header class="top"><div class="row"><div class="club">${title}</div>${cash != null ? `<button class="tokchip" data-act="go" data-arg="club:tok" aria-label="Tokens: ${D.tok(D.myIdx)}">${IC.gem}${D.tok(D.myIdx)}</button><div class="cash ${cash < 0 ? 'neg' : ''}" aria-label="Caja">${IC.coin}${money(cash)}</div>` : ''}</div>${tabs}</header>`;
 }
 function body() {
@@ -872,9 +886,17 @@ function leagueView() {
 }
 
 /* ---------- mercado ---------- */
+// subastas nuevas desde la última vez que miraste el mercado
+const aucSeen = () => { try { return +localStorage.getItem('aucSeen') || 0; } catch (e) { return 0; } };
+const newAuctions = () => !D || !D.my ? 0 : Object.values(S.auctions).filter(a => a.status === 'open' && a.ends > Date.now() && a.seller !== D.my.id && (a.t || 0) > aucSeen()).length;
+const AUC_TAG = { estrella: '⭐ Crack', titular: 'Titular', joven: 'Promesa', veterano: 'Veterano', ganga: 'Ganga', ia: 'Vende la IA' };
+const aucTag = (a, seller) => { const l = seller && seller.owner ? 'Vende ' + seller.name : AUC_TAG[a.kind] || (seller ? 'Vende la IA' : ''); return l ? `<span class="auc-tag${seller && seller.owner ? ' friend' : ''}">${esc(l)}</span>` : ''; };
+const AUC_DUR = [[30, '30 minutos'], [120, '2 horas'], [360, '6 horas'], [720, '12 horas'], [1440, '24 horas']];
+const durTxt = m => (AUC_DUR.find(x => x[0] === m) || [0, m + ' min'])[1];
 function canAfford(price) { return D.fin(D.myIdx).cash >= price; }
 function marketView() {
   if (!D.my) return pickTeamView();
+  if (S.msub === 'subastas') { try { localStorage.setItem('aucSeen', Date.now()); } catch (e) {} }
   const subs = [['subastas', 'Subastas'], ['libres', 'Libres'], ['equipos', 'Rivales'], ['ofertas', 'Ofertas']];
   let html = `<div class="sub">${subs.map(([k, l]) => `<button data-act="msub" data-arg="${k}" aria-pressed="${S.msub === k}">${l}</button>`).join('')}</div>`;
   if (S.msub === 'subastas') {
@@ -1013,6 +1035,11 @@ function modal() {
   if (m.type === 'tuto') return tutoHTML(m.i);
   let inner = '';
   if (m.type === 'player') inner = playerModal(m.id);
+  if (m.type === 'auction') { const p = E.player(m.id), v = E.pval(m.id, D.Sx, D.my.xp?.[m.id] || 0); let dv = 720; try { dv = +localStorage.getItem('auc-dur') || 720; } catch (e) {}
+    inner = `<h2>Subastar a ${esc(p.name)}</h2><p class="mute">Precio de salida: <b>${money(E.r1(v * .6))}</b> (60% de su valor). Pujan tus amigos y los equipos de la IA que necesiten un ${esc(p.pos)}. Se lo lleva la puja más alta.</p>
+    <label class="f">Duración<select id="auc-dur">${AUC_DUR.map(([k, l]) => `<option value="${k}" ${k === dv ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <p class="small mute" style="margin:8px 0 12px">Cuanto más dure, más gente la verá. El bot la anuncia en el grupo de Telegram.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn y" data-act="auctiongo" data-arg="${m.id}">Poner en subasta</button><button class="btn ghost" data-act="close">Cancelar</button></div>`; }
   if (m.type === 'noticia') { const x = (S.noticias || {})[m.id]; inner = !x ? '<p class="mute">Esta noticia ya no está disponible.</p>' : x.img ? `<h2 style="margin-right:48px">${esc(x.caption || 'Noticia')}</h2><img class="noticia-big" src="${esc(x.img)}" alt="${esc(x.caption || 'Noticia')}"><p class="mute small">${agoTxt(x.t)}</p>` : `<h2 style="margin-right:48px">${esc(x.caption || 'Crónica')}</h2><p style="white-space:pre-line;line-height:1.55">${esc(x.text || '')}</p><p class="mute small">${agoTxt(x.t)}</p>`; }
   if (m.type === 'confirm') inner = `<h2>${esc(m.title)}</h2><p>${esc(m.text)}</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ${m.danger ? 'red' : 'y'}" data-act="confirm">${esc(m.ok || 'Confirmar')}</button><button class="btn ghost" data-act="close">Cancelar</button></div>`;
   if (m.type === 'team') { const t = S.teams[m.id]; inner = `<div class="ph" style="margin-right:48px"><h2>${esc(t.name)}</h2>${crest(t, 48)}</div><p class="mute small">${t.owner ? esc(mgrName(t.owner)) : 'Equipo de la IA'} · ${esc(E.STADIUM[E.stLvl(t)].n).toLowerCase()} de ${E.STADIUM[E.stLvl(t)].cap.toLocaleString('es-ES')} asientos</p>${squadList(t)}`; }
@@ -1188,7 +1215,8 @@ const ACT = {
   scout: async prem => { const t = D.my, id = 'y-' + D.Sx + '-' + t.id + '-' + (t.scouts || 0) + '-' + E.facLvl(t, 'can') + (prem === 'p' ? '-p' : ''), p = E.player(id); const patch = { squad: [...t.squad, id], scouts: (t.scouts || 0) + 1, lastScout: today(), ledger: ledgerAdd(t, -SCOUT_COST, 'Ojeador: ' + p.name) }; if (prem === 'p') { if (!(await spendTok(3, 'Ojeador premium', patch))) return; } else await saveTeam(t.id, patch); S.modal = { type: 'player', id }; render(); },
   csub: v => { S.csub = v; render(); },
   bid: id => bid(id).catch(e => console.warn(e)),
-  auction: pid => ask('Subastar a ' + E.player(pid).name, 'Saldrá en subasta 30 minutos con un precio de salida del 60% de su valor. Si alguien puja, el jugador se va al mejor postor.', 'Subastar', () => auctionMine(pid)),
+  auction: pid => { S.modal = { type: 'auction', id: pid }; render(); },
+  auctiongo: pid => { const m = +($('#auc-dur')?.value || 30); try { localStorage.setItem('auc-dur', m); } catch (e) {} auctionMine(pid, m); },
   cupmatch: a => { const [r, k] = a.split('-').map(Number), id = 's' + D.Sx + '-r' + r, doc = S.cup[id]; if (!doc) return; const m = doc.m[k]; openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...liveOpts('cup', id, doc, k), speed: 4, summary: endSummary('cup', doc, { pens: doc.pens && doc.pens[k] }) }); },
   clmatch: a => { const [r, k] = a.split('-').map(Number), id = 's' + D.Sx + '-r' + r, doc = S.cl[id]; if (!doc) return; const m = doc.m[k]; openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...liveOpts('cl', id, doc, k), speed: 4, summary: endSummary('cl', doc, { pens: r === 3 ? doc.pens && doc.pens[k] : null, final: r === 3 }) }); },
   muro: async () => { const el = $('#muro-txt'), txt = (el && el.value || '').trim().slice(0, 180); if (!txt || !D.my) return; const ref = S.db.collection('muro').doc(); await write('muro/' + ref.id, () => ref.set({ id: ref.id, by: S.me, team: D.my.id, txt, t: Date.now() })); el.value = ''; },
