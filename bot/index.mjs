@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { initializeApp } from 'firebase/app';
 import { createNews, render as renderNews, setKey as setAIKey, testKey } from './news/news.mjs';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
@@ -47,12 +48,25 @@ async function sendPhoto(chat, buf, caption) {
     if (!j.ok) console.warn('sendPhoto', j.description); return j;
   } catch (e) { console.warn('sendPhoto', e.message); return {}; }
 }
+const NEWS_DIR = process.env.NEWS_DIR || '/news-out';
+const codeOfChat = chat => Object.keys(ST.leagues).find(k => ST.leagues[k].chat === chat);
+async function storeNews(code, n, buf, text) {
+  if (!code) return;
+  try {
+    const id = Date.now().toString(36) + crypto.randomBytes(5).toString('hex');
+    let img = null;
+    if (buf) { fs.mkdirSync(NEWS_DIR, { recursive: true }); fs.writeFileSync(path.join(NEWS_DIR, id + '.jpg'), buf); img = '/noticias/' + id + '.jpg'; }
+    const data = { t: Date.now(), kind: n.kind, caption: n.caption || '', img, text: text || null };
+    await setDoc(doc(db, 'ligas/' + code + '/noticias/' + id), Object.fromEntries(Object.entries(data).map(([k, v]) => [k, JSON.stringify(v)])));
+  } catch (e) { console.warn('storeNews', e.message); }
+}
+async function publishNews(chat, n) { const buf = await renderNews(n.kind, n.data); await sendPhoto(chat, buf, esc(n.caption)); storeNews(codeOfChat(chat), n, buf); }
 const nq = {}; // cola de noticias por chat: una imagen cada ~50 s como mínimo
 function queueNews(chat, maker, delay = 0) {
   const prev = nq[chat] || Promise.resolve();
   nq[chat] = prev.then(async () => {
     if (delay) await new Promise(z => setTimeout(z, delay));
-    try { const n = await maker(); if (!n) return; const buf = await renderNews(n.kind, n.data); await sendPhoto(chat, buf, esc(n.caption)); }
+    try { const n = await maker(); if (!n) return; await publishNews(chat, n); }
     catch (e) { console.warn('noticia', e.message); }
     await new Promise(z => setTimeout(z, 50000));
   });
@@ -187,7 +201,7 @@ function onFinal(lg, k, id, d) {
       txt += '\n\n<b>Clasificación</b>\n' + tb.map((r, i) => `${i + 1}. ${isHuman(lg, r.t) ? '<b>' : ''}${esc(idxName(lg, r.t))} · ${r.pts}${isHuman(lg, r.t) ? '</b>' : ''}`).filter((_, i, a) => i < 5 || isHuman(lg, tb[i].t)).join('\n');
     }
     send(chat, txt);
-    setTimeout(() => { const b = pique(lg, k, d); if (b.length) send(chat, '🎙️ <b>El vestuario opina</b>\n\n' + b.join('\n\n')); }, 15000);
+    setTimeout(() => { const b = pique(lg, k, d); if (b.length) { send(chat, '🎙️ <b>El vestuario opina</b>\n\n' + b.join('\n\n')); storeNews(code, { kind: 'texto', caption: '🎙️ El vestuario opina · ' + (k === 'jor' ? 'Jornada ' + d.md : k === 'cup' ? 'Copa' : 'Champions') }, null, b.join('\n\n').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')); } }, 15000);
     newsAfter(lg, chat, k, id, d);
   });
 }
@@ -474,7 +488,7 @@ function newsAfter(lg, chat, k, id, d) {
     // se prueban por prioridad; salen como mucho 2 extra (los que no aplican devuelven null)
     const order = opts.sort((a, b) => b.p - a.p);
     let sent = 0;
-    queueNews(chat, async () => { for (const o of order) { if (sent >= 2) break; const n = await o.f(); if (n) { sent++; const buf = await renderNews(n.kind, n.data); await sendPhoto(chat, buf, esc(n.caption)); if (sent < 2) await sleep(60000); } } return null; }, 30000);
+    queueNews(chat, async () => { for (const o of order) { if (sent >= 2) break; const n = await o.f(); if (n) { sent++; await publishNews(chat, n); if (sent < 2) await sleep(60000); } } return null; }, 30000);
   } else {
     const R = k === 'cup' ? E.cupBracket(lg.cfg.n, lg.cfg.seed + ':' + lg.cfg.season).rounds : 4, r = +String(id).split('-r')[1], final = r === R - 1;
     const comp = k === 'cup' ? (final ? 'Final de Copa' : 'Copa') : (final ? 'Final de la Champions' : 'Champions');

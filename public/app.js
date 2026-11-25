@@ -368,6 +368,17 @@ function objectiveHTML() {
   const st = o.done ? (o.met ? `<b class="pos-amt">¡Cumplido!</b> +${money(OBJ_PRIZE.cash)} y +${OBJ_PRIZE.tok} tokens` : '<b class="neg-amt">No cumplido</b>. La directiva espera más la próxima temporada.') : o.pos ? `Vas ${o.pos}º · ${o.onTrack ? '<b class="pos-amt">dentro del objetivo</b>' : '<b class="neg-amt">fuera del objetivo</b>'}` : 'Empieza la temporada.';
   return `<section class="panel obj">${prizeImg('medalla', 64)}<div><h3>Objetivo de la directiva</h3><p class="objt">${o.txt}</p><p class="small mute">${st}${o.done ? '' : ` · Premio: ${money(OBJ_PRIZE.cash)} y ${OBJ_PRIZE.tok} ${IC.gem}`}</p></div></section>`;
 }
+/* prensa de la liga: noticias que publica el bot (imágenes de los medios ficticios y crónicas en texto) */
+const agoTxt = t => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'ahora' : m < 60 ? 'hace ' + m + ' min' : m < 1440 ? 'hace ' + Math.round(m / 60) + ' h' : 'hace ' + Math.round(m / 1440) + ' d'; };
+function prensaHTML() {
+  const list = Object.entries(S.noticias || {}).map(([id, x]) => ({ id, ...x })).filter(x => x.t).sort((a, b) => b.t - a.t).slice(0, 40);
+  if (!list.length && !WEB()) return '';
+  const item = x => x.img
+    ? `<button class="prensa-it" data-act="noticia" data-arg="${esc(x.id)}"><img src="${esc(x.img)}" alt="${esc(x.caption || 'Noticia')}" loading="lazy"><span><b>${esc(x.caption || '')}</b><small class="mute">${agoTxt(x.t)}</small></span></button>`
+    : `<button class="prensa-it txt" data-act="noticia" data-arg="${esc(x.id)}"><span><b>${esc(x.caption || 'Crónica')}</b><small class="mute">${agoTxt(x.t)}</small><p>${esc(String(x.text || '').slice(0, 220))}${String(x.text || '').length > 220 ? '…' : ''}</p></span></button>`;
+  return `<section class="panel"><div class="ph"><h3>Prensa de la liga</h3><small class="mute">${list.length ? list.length + ' noticias' : ''}</small></div>
+  ${list.length ? `<div class="prensa" tabindex="0" aria-label="Noticias recientes">${list.map(item).join('')}</div>` : '<p class="mute small">Aquí saldrán las portadas, rumores y crónicas de la liga. Las publica el bot cuando la liga está vinculada a vuestro grupo de Telegram (Club → Avisos por Telegram).</p>'}</section>`;
+}
 /* muro de la liga: mensajes cortos entre los amigos */
 function muroHTML(limit) {
   const msgs = Object.values(S.muro || {}).sort((a, b) => b.t - a.t).slice(0, limit);
@@ -664,7 +675,7 @@ function homeView() {
   const rows = D.table, myPos = rows.findIndex(r => r.t === D.myIdx);
   const show = rows.filter((r, k) => k < 4 || Math.abs(k - myPos) <= 1);
   return `<div class="grid"><div class="stackp">${main}${objectiveHTML()}${upcomingHTML()}${last ? `<section class="panel"><div class="ph"><h3>Último partido · J${lastDoc.md}</h3><button class="btn sm" data-act="match" data-arg="${lastDoc.season}-${lastDoc.md}-${lastDoc.m.indexOf(last)}">${IC.play}Ver partido</button></div>${matchRow(last, lastDoc, lastDoc.m.indexOf(last))}</section>` : ''}</div>
-  <div class="stackp"><section class="panel"><div class="ph"><h3>Clasificación</h3><button class="btn sm ghost" data-act="go" data-arg="liga:tabla">Completa</button></div>${tableHTML(show, true)}</section>${muroHTML(4)}
+  <div class="stackp"><section class="panel"><div class="ph"><h3>Clasificación</h3><button class="btn sm ghost" data-act="go" data-arg="liga:tabla">Completa</button></div>${tableHTML(show, true)}</section>${prensaHTML()}${muroHTML(4)}
   <section class="panel"><h3>Avisos del míster</h3>${avisos.length ? `<ul class="small" style="padding-left:18px;margin:8px 0 0">${avisos.join('')}</ul>` : '<p class="mute small">Todo en orden, míster.</p>'}</section></div></div>`;
 }
 function nextBoard(nx) {
@@ -1002,6 +1013,7 @@ function modal() {
   if (m.type === 'tuto') return tutoHTML(m.i);
   let inner = '';
   if (m.type === 'player') inner = playerModal(m.id);
+  if (m.type === 'noticia') { const x = (S.noticias || {})[m.id]; inner = !x ? '<p class="mute">Esta noticia ya no está disponible.</p>' : x.img ? `<h2 style="margin-right:48px">${esc(x.caption || 'Noticia')}</h2><img class="noticia-big" src="${esc(x.img)}" alt="${esc(x.caption || 'Noticia')}"><p class="mute small">${agoTxt(x.t)}</p>` : `<h2 style="margin-right:48px">${esc(x.caption || 'Crónica')}</h2><p style="white-space:pre-line;line-height:1.55">${esc(x.text || '')}</p><p class="mute small">${agoTxt(x.t)}</p>`; }
   if (m.type === 'confirm') inner = `<h2>${esc(m.title)}</h2><p>${esc(m.text)}</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ${m.danger ? 'red' : 'y'}" data-act="confirm">${esc(m.ok || 'Confirmar')}</button><button class="btn ghost" data-act="close">Cancelar</button></div>`;
   if (m.type === 'team') { const t = S.teams[m.id]; inner = `<div class="ph" style="margin-right:48px"><h2>${esc(t.name)}</h2>${crest(t, 48)}</div><p class="mute small">${t.owner ? esc(mgrName(t.owner)) : 'Equipo de la IA'} · ${esc(E.STADIUM[E.stLvl(t)].n).toLowerCase()} de ${E.STADIUM[E.stLvl(t)].cap.toLocaleString('es-ES')} asientos</p>${squadList(t)}`; }
   if (m.type === 'offer') { const p = E.player(m.id); inner = `<h2>Oferta por ${esc(p.name)}</h2><p class="mute">Valor de mercado ${money(m.val)}. Tienes ${money(D.fin(D.myIdx).cash)}.</p><label class="f">Tu oferta (M€)<input type="number" id="o-price" min="0.1" step="0.1" value="${m.val}"></label><div style="display:flex;gap:8px;margin-top:12px"><button class="btn y" data-act="sendoffer" data-arg="${m.id}">Enviar oferta</button><button class="btn ghost" data-act="close">Cancelar</button></div>`; }
@@ -1152,6 +1164,7 @@ const ACT = {
     openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...lo, speed: 4, manage, summary: endSummary('league', doc) });
   },
   friendly: () => { S.modal = { type: 'friendly' }; render(); },
+  noticia: id => { S.modal = { type: 'noticia', id }; render(); },
   playfriendly: () => { const rival = +$('#f-rival').value, view = $('#f-view').value, sp = $('#f-speed').value; const fr = E.simulateFriendly(S.cfg, D.teams, D.myIdx, rival, D.Sx, D.cur, Date.now() + ':' + Math.random()), ords = []; const m = fr.m; try { localStorage.setItem('mv-view', view); } catch (e) {} S.modal = null; render(); const manage = { side: 0, bench: fr.pre.side[0].bench, onOrder: o => { ords.push({ ...o, s: 0, t: Date.now() }); VW && VW.update(E.resultFromPre(fr.pre, ords)); toast(o.k === 'sub' ? 'Cambio hecho' : 'Táctica cambiada'); } }; openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), live: null, view, speed: sp === 'h' ? 4 : +sp, highlights: sp === 'h', summary: endSummary('friendly'), manage }); },
   close: () => { S.modal = null; S.rp = null; render(); },
   tuto: i => { S.modal = { type: 'tuto', i: +i }; render(); document.querySelector('.tuto-card .btn.y')?.focus(); },
@@ -1255,6 +1268,7 @@ setInterval(tick, 20000);
   db.collection('jornadas').onSnapshot(q => { const j = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.m) j[d.id] = x; }); S.jor = j; changed(); }, e => console.warn(e));
   db.collection('ordenes').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.list) o[d.id] = x; }); S.orders = o; changed(); }, e => console.warn(e));
   db.collection('subastas').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.pid) o[d.id] = x; }); S.auctions = o; changed(); }, e => console.warn(e));
+  db.collection('noticias').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.t) o[d.id] = x; }); S.noticias = o; changed(); }, e => console.warn(e));
   db.collection('muro').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.txt) o[d.id] = x; }); S.muro = o; changed(); }, e => console.warn(e));
   db.collection('champions').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.m) o[d.id] = x; }); S.clRaw = o; changed(); }, e => console.warn(e));
   db.collection('sorteos').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.groups) o[d.id] = x; }); S.sorteos = o; if (D) D._cls = D._clst = null; changed(); }, e => console.warn(e));

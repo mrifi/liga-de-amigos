@@ -16,7 +16,7 @@ fi
 echo "Construyendo el bot..."
 docker build -q -t liga-bot -f bot/Dockerfile . >/dev/null
 docker rm -f liga-bot >/dev/null 2>&1 || true
-docker run -d --name liga-bot --restart unless-stopped --env-file "$ENVF" -v liga-bot-data:/data liga-bot >/dev/null
+docker run -d --name liga-bot --restart unless-stopped --env-file "$ENVF" -v liga-bot-data:/data -v liga-news:/news-out liga-bot >/dev/null
 sleep 8
 docker logs --tail 15 liga-bot
 if docker logs liga-bot 2>&1 | grep -q "Bot en marcha"; then

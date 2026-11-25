@@ -10,6 +10,11 @@
 			header_up Host {upstream_hostport}
 		}
 	}
+	handle_path /noticias/* {
+		root * /srv-news
+		header Cache-Control "public, max-age=604800"
+		file_server
+	}
 	handle {
 		root * /srv
 		file_server

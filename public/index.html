@@ -482,6 +482,17 @@ body[data-tutonav=inicio] nav.tabs [data-arg=inicio],body[data-tutonav=equipo] n
 /* controles del visor: que nunca se monten unos encima de otros en paneles estrechos */
 .mv-opts{flex-wrap:wrap;row-gap:6px}.mv-opts .mv-b{flex-shrink:0}.mv-vol{min-width:72px}
 .mv-tabs button{font-size:clamp(13px,1.35vw,17px);padding:8px 2px;white-space:nowrap}
+
+/* prensa de la liga */
+.prensa{display:flex;flex-direction:column;gap:10px;max-height:560px;overflow-y:auto;overscroll-behavior:contain;padding-right:4px;margin-top:6px}
+.prensa-it{display:grid;grid-template-columns:96px 1fr;gap:12px;align-items:center;text-align:left;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:8px;color:inherit;font:inherit;cursor:pointer}
+.prensa-it:hover{border-color:rgba(255,214,90,.45)}
+.prensa-it img{width:96px;height:120px;object-fit:cover;object-position:top;border-radius:10px;background:#0c1730}
+.prensa-it span{display:flex;flex-direction:column;gap:4px;min-width:0}
+.prensa-it b{font-size:14px;line-height:1.3}
+.prensa-it.txt{grid-template-columns:1fr}
+.prensa-it.txt p{margin:2px 0 0;font-size:13px;line-height:1.45;color:var(--mute, #a9b4d0);white-space:pre-line}
+.noticia-big{display:block;width:100%;max-height:72vh;object-fit:contain;border-radius:12px;margin:8px 0;background:#000}
 /* acceso (versión web) */
 body.gated #app{display:none}
 .gate{position:fixed;inset:0;z-index:100;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:max(24px,env(safe-area-inset-top)) 14px 32px;background:radial-gradient(120% 70% at 50% 0%,rgba(51,173,82,.18),transparent 60%),var(--bg)}
