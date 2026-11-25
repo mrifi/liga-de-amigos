@@ -589,15 +589,17 @@ function rollPack(kind, used) {
 async function openPack(kind, pay) {
   const t = D.my, P = PACKS[kind]; if (!t || !P || S.opening) return;
   const st = packState(t);
-  if (kind !== 'bronce' && !(P.cost && P.cost[pay])) return; // solo formas de pago válidas para ese sobre
+  const vale = ((t.packs || {}).vale || {})[kind] || 0;
+  if (pay === 'vale' ? !vale : kind === 'bronce' ? pay !== 'free' : !(P.cost && P.cost[pay])) return; // solo formas de pago válidas para ese sobre
   if (kind === 'bronce' && !st.freeOk) return toast('Ya has abierto tu sobre gratis de hoy');
-  if (kind === 'oro' && st.goldLeft <= 0) return toast('Ya has abierto 2 sobres de oro esta semana');
+  if (kind === 'oro' && pay !== 'vale' && st.goldLeft <= 0) return toast('Ya has abierto 2 sobres de oro esta semana');
   if (pay === 'tok' && D.tok(D.myIdx) < P.cost.tok) return toast('No tienes tokens suficientes');
   if (pay === 'cash' && D.fin(D.myIdx).cash < P.cost.cash) return toast('No tienes dinero suficiente');
   S.opening = true;
   try {
     const prizes = rollPack(kind, new Set()); let squad = [...t.squad], led = t.ledger || [], tok = t.tok || [], items = { ...(t.items || {}) };
-    const pk = { ...(t.packs || {}) }; if (kind === 'bronce') pk.free = today(); if (kind === 'oro') { pk.gold = (pk.week === isoWeek() ? pk.gold || 0 : 0) + 1; pk.week = isoWeek(); }
+    const pk = { ...(t.packs || {}) }; if (kind === 'bronce') pk.free = today(); if (kind === 'oro' && pay !== 'vale') { pk.gold = (pk.week === isoWeek() ? pk.gold || 0 : 0) + 1; pk.week = isoWeek(); }
+    if (pay === 'vale') pk.vale = { ...(pk.vale || {}), [kind]: vale - 1 };
     if (pay === 'tok') tok = tokAdd({ tok }, -P.cost.tok, P.name);
     if (pay === 'cash') led = ledgerAdd({ ledger: led }, -P.cost.cash, P.name);
     for (const x of prizes) {
@@ -640,6 +642,7 @@ function packsView() {
     if (k === 'bronce') btns = `<button class="btn y" data-act="pack" data-arg="bronce:free" ${st.freeOk ? '' : 'disabled'}>${st.freeOk ? 'Abrir gratis' : 'Mañana otro'}</button>`;
     if (k === 'plata') btns = `<button class="btn y" data-act="pack" data-arg="plata:tok">Abrir · 3 ${IC.gem}</button>`;
     if (k === 'oro') btns = st.goldLeft > 0 ? `<button class="btn y" data-act="pack" data-arg="oro:tok">8 ${IC.gem}</button><button class="btn" data-act="pack" data-arg="oro:cash">${money(15)}</button>` : '<button class="btn" disabled>Vuelve la semana que viene</button>';
+    const nv = ((t.packs || {}).vale || {})[k] || 0; if (nv > 0) btns = `<button class="btn y" data-act="pack" data-arg="${k}:vale">Abrir con vale (${nv})</button>` + btns;
     return `<div class="pack-card">${packArt(k)}<div class="pack-info"><b>${P.name}</b><small class="mute">${P.note}${k === 'oro' ? ` · te quedan ${Math.max(0, st.goldLeft)}` : ''}</small><div class="pack-btns">${btns}</div></div></div>`; };
   const items = Object.entries(it).filter(([, n]) => n > 0);
   return `<section class="panel"><div class="ph"><h3>Sobres</h3><small class="mute">${D.tok(D.myIdx)} ${IC.gem} · ${money(D.fin(D.myIdx).cash)}</small></div>
@@ -647,6 +650,118 @@ function packsView() {
     ${items.length ? `<p class="small" style="margin-top:12px">Tus bonos: ${items.map(([k, n]) => `<b>${ITEM_N[k]} ×${n}</b>`).join(' · ')}. Se usan solos en lugar de tokens.</p>` : ''}
     <details class="odds"><summary>Ver probabilidades</summary>${['bronce', 'plata', 'oro'].map(k => `<b>${PACKS[k].name}</b><ul>${PACK_ODDS[k].map(([l, p]) => `<li><span>${l}</span><span>${p}%</span></li>`).join('')}</ul>`).join('')}
     <p class="small mute">Solo salen jugadores libres, nunca los de otro equipo. Con la plantilla llena (${SQ_MAX}), el jugador se vende solo al 80% de su valor. Los sobres se pagan con tokens o dinero del juego, nunca con dinero real.</p></details></section>`;
+}
+
+/* ---------- ruleta diaria: 1 tirada gratis al día y hasta 3 más por 2 tokens (nunca dinero real) ---------- */
+const RUL = [
+  { s: '0,5 M€', n: 'Medio millón', img: 3, w: 24, k: 'dinero', v: .5 },
+  { s: '1 TOKEN', n: '1 token', img: 5, w: 15, k: 'tokens', v: 1 },
+  { s: 'FORMA', n: 'Bono de forma', img: 7, w: 12, k: 'bono', it: 'forma' },
+  { s: '1 M€', n: '1 millón', img: 3, w: 15, k: 'dinero', v: 1 },
+  { s: 'CURA', n: 'Bono de curación', img: 8, w: 8, k: 'bono', it: 'cura' },
+  { s: '3 TOKENS', n: '3 tokens', img: 6, w: 5, k: 'tokens', v: 3 },
+  { s: 'ENTRENO', n: 'Entreno extra', img: 9, w: 8, k: 'bono', it: 'entreno' },
+  { s: '3 M€', n: '3 millones', img: 4, w: 6, k: 'dinero', v: 3 },
+  { s: 'PLATA', n: 'Sobre de plata', img: 10, w: 6, k: 'vale', p: 'plata' },
+  { s: 'ORO', n: 'Sobre de oro', img: 11, w: 1, k: 'vale', p: 'oro' }
+];
+const RUL_COST = 2, RUL_MAXPAID = 3, RUL_SL = 360 / RUL.length, RUL_W = RUL.reduce((a, p) => a + p.w, 0);
+const RUL_TXT = { dinero: 'Ya está en tu caja.', tokens: 'Ya están en tu saldo de tokens.', bono: 'Se usa solo, gratis, en lugar de tokens.', vale: 'Ábrelo gratis en Mercado → Sobres.' };
+const RUL_BULB = [0, 15.5, 32.8, 49.4, 66.1, 80.6, 96.5, 113.2, 129.5, 146.7, 163.1, 181.1, 198.5, 214, 230.9, 247.7, 263.3, 278.4, 293.7, 310.7, 327.3, 343.9];
+const rulImg = n => `img/ruleta/r${n}.webp`;
+const rulState = t => { const r = (t && t.ruleta) || {}, td = r.d === today(); return { freeOk: !(td && r.free), paid: td ? r.paid || 0 : 0 }; };
+const rulUnder = rot => Math.floor(((360 - rot % 360) % 360 + 360) % 360 / RUL_SL) % RUL.length;
+const rulEase = t => 1 - Math.pow(1 - t, 4);
+const rulAngle = m => m.phase === 'spin' ? m.from + (m.to - m.from) * rulEase(Math.min(1, (Date.now() - m.t0) / m.dur)) : (m.phase === 'won' ? m.to : (S.rulRot ?? -18));
+let RUL_SVG = '';
+function rulDisc() {
+  if (RUL_SVG) return RUL_SVG;
+  const R = 152, pt = (a, r) => [200 + r * Math.sin(a * Math.PI / 180), 200 - r * Math.cos(a * Math.PI / 180)].map(v => v.toFixed(1));
+  const fill = i => i === 9 ? ['#ff5a74', '#a3112f'] : i === 8 ? ['#eef2f8', '#7c8aa2'] : i % 2 ? ['#25c486', '#07603f'] : ['#3d74ff', '#10297a'];
+  let defs = '', body = '';
+  RUL.forEach((p, i) => {
+    const [a, b] = fill(i), a0 = i * RUL_SL, [x0, y0] = pt(a0, R), [x1, y1] = pt(a0 + RUL_SL, R);
+    defs += `<radialGradient id="rlg${i}" cx="200" cy="200" r="${R}" gradientUnits="userSpaceOnUse"><stop offset=".15" stop-color="${b}"/><stop offset=".7" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></radialGradient>`;
+    body += `<path d="M200 200L${x0} ${y0}A${R} ${R} 0 0 1 ${x1} ${y1}Z" fill="url(#rlg${i})"/><g transform="rotate(${a0 + RUL_SL / 2} 200 200)"><image href="${rulImg(p.img)}" x="170" y="88" width="60" height="60"/><text x="200" y="78" text-anchor="middle" class="rl-lab" font-size="${p.s.length > 6 ? 14 : 17}" fill="${i === 8 ? '#1b2537' : '#fff'}" stroke="rgba(0,0,0,.45)" stroke-width="${i === 8 ? 0 : 2.2}" paint-order="stroke">${p.s}</text></g>`;
+  });
+  RUL.forEach((p, i) => { const [x, y] = pt(i * RUL_SL, R); body += `<line x1="200" y1="200" x2="${x}" y2="${y}" stroke="#f9d97c" stroke-width="2.4"/>`; });
+  return RUL_SVG = `<defs>${defs}</defs>${body}<circle cx="200" cy="200" r="${R - 1}" fill="none" stroke="rgba(0,0,0,.35)" stroke-width="6"/>`;
+}
+function rulWheel(rot, big, fast) {
+  const ph = -((Date.now() % 1200) / 1000).toFixed(2);
+  const bulbs = RUL_BULB.map((a, i) => `<circle class="rl-b" style="animation-delay:${(ph - (i % 3) * .4).toFixed(2)}s" cx="${(200 + 167.5 * Math.sin(a * Math.PI / 180)).toFixed(1)}" cy="${(200 - 167.5 * Math.cos(a * Math.PI / 180)).toFixed(1)}" r="11"/>`).join('');
+  return `<div class="rl-wheel${big ? ' big' : ''}${fast ? ' fast' : ''}" aria-hidden="true">
+    <svg class="rl-disc" viewBox="0 0 400 400"><g${big ? ' id="rl-disc"' : ''} transform="rotate(${rot.toFixed(2)} 200 200)">${rulDisc()}</g></svg>
+    <img class="rl-ring" src="${rulImg(0)}" alt=""><svg class="rl-lights" viewBox="0 0 400 400"><defs><radialGradient id="rlb"><stop offset="0" stop-color="#fffbe6"/><stop offset=".35" stop-color="rgba(255,214,110,.9)"/><stop offset="1" stop-color="rgba(255,180,40,0)"/></radialGradient></defs>${bulbs}</svg>
+    <img class="rl-hub" src="${rulImg(2)}" alt=""><img class="rl-ptr"${big ? ' id="rl-ptr"' : ''} src="${rulImg(1)}" alt=""></div>`;
+}
+function rulCard() {
+  const st = rulState(D.my);
+  return `<section class="panel rl-card"><div class="rl-mini">${rulWheel(S.rulRot ?? -18, false, false)}</div><div class="rl-ci"><h3>Ruleta diaria</h3><p class="small mute">${st.freeOk ? 'Tienes una tirada <b>gratis</b> hoy: dinero, tokens, bonos o un sobre de oro.' : `Gratis ya usada (vuelve mañana). Extra: ${RUL_COST} ${IC.gem}, te quedan ${RUL_MAXPAID - st.paid} hoy.`}</p><button class="btn y" data-act="rulopen">${st.freeOk ? '¡Girar gratis!' : 'Abrir la ruleta'}</button></div></section>`;
+}
+function rulModal(m) {
+  const st = rulState(D.my), spin = m.phase === 'spin', won = m.phase === 'won', p = m.win != null ? RUL[m.win] : null;
+  const ago = won ? -((Date.now() - (m.tw || Date.now())) / 1000).toFixed(2) : 0;
+  const stat = spin ? 'Girando…<small>&nbsp;</small>' : won ? `${p.p === 'oro' ? '¡¡Premio gordo!!' : 'Te ha tocado'}<small>${esc(p.n)}</small>` : st.freeOk ? `Tirada gratis lista<small>Una gratis al día · hasta ${RUL_MAXPAID} más por ${RUL_COST} tokens</small>` : `Gratis ya usada hoy<small>${st.paid >= RUL_MAXPAID ? 'Ya no quedan tiradas extra hoy: vuelve mañana' : `Te quedan ${RUL_MAXPAID - st.paid} tiradas extra por ${RUL_COST} tokens`}</small>`;
+  const dis = c => c ? ' aria-disabled="true"' : '';
+  const winCard = won ? `<div class="rl-win${p.p === 'oro' ? ' jack' : ''}" style="animation-delay:${ago}s"><div class="rl-rays" style="animation-delay:${ago}s"></div><img src="${rulImg(p.img)}" alt="" style="animation-delay:${ago}s,${(ago + 1).toFixed(2)}s"><h2>${esc(p.n)}</h2><p>${RUL_TXT[p.k]}</p><button class="btn y" data-act="rulok">¡Recoger!</button></div>` : '';
+  return `<div class="ov rl-ov" data-act="ovclose"><div class="rl-sheet sheet-rl" role="dialog" aria-modal="true" aria-label="Ruleta diaria">
+    <div class="rl-top"><h2>Ruleta <span>diaria</span></h2><span class="rl-tok">${IC.gem}${D.tok(D.myIdx)}</span><button class="rl-x" data-act="close" aria-label="Cerrar">${IC.x}</button></div>
+    ${rulWheel(rulAngle(m), true, spin)}
+    <div class="rl-status" aria-live="polite">${stat}</div>
+    <div class="rl-btns"><button class="rl-free" data-act="rulspin" data-arg="free"${dis(spin || !st.freeOk)}>Tirar gratis<small>${st.freeOk ? 'disponible' : 'vuelve mañana'}</small></button><button class="rl-paid" data-act="rulspin" data-arg="tok"${dis(spin || st.paid >= RUL_MAXPAID || D.tok(D.myIdx) < RUL_COST)}>Tirar · ${RUL_COST} ${IC.gem}<small>${RUL_MAXPAID - st.paid} de ${RUL_MAXPAID} hoy</small></button></div>
+    <details class="odds rl-odds"><summary>Premios y probabilidades</summary><ul>${RUL.map(x => `<li><span><img src="${rulImg(x.img)}" alt="" width="26" height="26"> ${esc(x.n)}</span><span>${Math.round(x.w / RUL_W * 100)}%</span></li>`).join('')}</ul><p class="small mute">Todas las casillas miden igual, pero cada premio tiene su probabilidad. El premio se decide y se guarda antes de girar. Se paga con tokens del juego, nunca con dinero real.</p></details>
+    ${winCard}</div></div>`;
+}
+let rulAC = null;
+const rulBeep = (f, d, type = 'triangle', g0 = .1, at = 0) => { try { rulAC = rulAC || new (window.AudioContext || window.webkitAudioContext)(); const o = rulAC.createOscillator(), g = rulAC.createGain(), t = rulAC.currentTime + at; o.type = type; o.frequency.value = f; g.gain.setValueAtTime(g0, t); g.gain.exponentialRampToValueAtTime(.001, t + d); o.connect(g).connect(rulAC.destination); o.start(t); o.stop(t + d + .01); } catch (e) { /* sin sonido */ } };
+function rulLoop() {
+  const m = S.modal; if (!m || m.type !== 'ruleta' || m.phase !== 'spin') return;
+  const rot = rulAngle(m), d = document.getElementById('rl-disc'); if (d) d.setAttribute('transform', `rotate(${rot.toFixed(2)} 200 200)`);
+  const u = rulUnder(rot);
+  if (u !== m.last) { m.last = u; rulBeep(1500, .05); const ptr = document.getElementById('rl-ptr'); if (ptr) { ptr.classList.add('kick'); setTimeout(() => ptr.classList.remove('kick'), 70); } }
+  if (Date.now() - m.t0 >= m.dur) { m.phase = 'won'; m.tw = Date.now(); S.rulRot = m.to % 360; rulCelebrate(m.win); render(); return; }
+  requestAnimationFrame(rulLoop);
+}
+function rulCelebrate(i) {
+  const jack = RUL[i].p === 'oro', big = jack || i >= 5;
+  [523, 659, 784, big ? 1047 : 0].forEach((f, k) => f && rulBeep(f, .25, 'square', .05, k * .11));
+  try { navigator.vibrate && navigator.vibrate(jack ? [80, 60, 80, 60, 200] : 60); } catch (e) { /* sin vibración */ }
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let cv = document.getElementById('rl-fx'); if (!cv) { cv = document.createElement('canvas'); cv.id = 'rl-fx'; document.body.appendChild(cv); }
+  const dpr = window.devicePixelRatio || 1, W = innerWidth, H = innerHeight, cx = cv.getContext('2d'); cv.width = W * dpr; cv.height = H * dpr;
+  const cols = jack ? ['#ffd54a', '#fff3b0', '#f2a81d', '#ffffff'] : ['#ffd54a', '#3d74ff', '#25c486', '#ff5a74', '#ffffff'];
+  let parts = [...Array(jack ? 260 : big ? 140 : 70)].map((_, k) => ({ x: W / 2, y: H * .42, vx: (Math.random() - .5) * 14, vy: -Math.random() * 14 - 4, r: Math.random() * 6 + 4, a: Math.random() * 6, va: (Math.random() - .5) * .4, c: cols[k % cols.length], l: 0 }));
+  const step = () => { cx.clearRect(0, 0, cv.width, cv.height); parts = parts.filter(p => p.l < 170 && p.y < H + 30);
+    parts.forEach(p => { p.l++; p.vy += .32; p.vx *= .99; p.x += p.vx; p.y += p.vy; p.a += p.va; cx.save(); cx.translate(p.x * dpr, p.y * dpr); cx.rotate(p.a); cx.globalAlpha = Math.max(0, 1 - p.l / 170); cx.fillStyle = p.c; cx.fillRect(-p.r * dpr / 2, -p.r * dpr / 4, p.r * dpr, p.r * dpr / 2); cx.restore(); });
+    if (parts.length) requestAnimationFrame(step); else cx.clearRect(0, 0, cv.width, cv.height); };
+  requestAnimationFrame(step);
+}
+async function rulSpin(how) {
+  const t = D && D.my, m0 = S.modal; if (!t || S.rulBusy || (m0 && m0.type === 'ruleta' && m0.phase === 'spin')) return;
+  const st = rulState(t), paid = how === 'tok';
+  if (!paid && !st.freeOk) return toast('La tirada gratis vuelve mañana');
+  if (paid && st.paid >= RUL_MAXPAID) return toast(`Ya has hecho las ${RUL_MAXPAID} tiradas extra de hoy`);
+  if (paid && D.tok(D.myIdx) < RUL_COST) return toast('No tienes tokens suficientes');
+  S.rulBusy = true;
+  rulBeep(1, .01, 'sine', .0001); // desbloquea el audio en iPhone dentro del toque
+  try {
+    const win = wpick(RUL.map((p, i) => [i, p.w])), p = RUL[win], td = today(), r = t.ruleta || {}, prev = r.d === td ? r : {};
+    const ru = { d: td, free: !!prev.free || !paid, paid: (prev.paid || 0) + (paid ? 1 : 0) };
+    let tok = t.tok || [], led = t.ledger || [];
+    const items = { ...(t.items || {}) }, packs = { ...(t.packs || {}) };
+    if (paid) tok = tokAdd({ tok }, -RUL_COST, 'Ruleta: tirada extra');
+    if (p.k === 'dinero') led = ledgerAdd({ ledger: led }, p.v, 'Ruleta: premio');
+    if (p.k === 'tokens') tok = tokAdd({ tok }, p.v, 'Ruleta: premio');
+    if (p.k === 'bono') items[p.it] = (items[p.it] || 0) + 1;
+    if (p.k === 'vale') packs.vale = { ...(packs.vale || {}), [p.p]: ((packs.vale || {})[p.p] || 0) + 1 };
+    await saveTeam(t.id, { ruleta: ru, tok, ledger: led, items, packs });
+    S.db.collection('ruleta').doc().set({ t: Date.now(), team: t.id, premio: win, paid }).catch(() => {});
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches, from = S.rulRot ?? -18, land = win * RUL_SL + RUL_SL * (.18 + rnd() * .64);
+    const to = from + 360 * (reduce ? 2 : 7) + (((360 - land) - from % 360) % 360 + 360) % 360;
+    S.modal = { type: 'ruleta', phase: 'spin', from, to, t0: Date.now(), dur: reduce ? 1500 : 5600, win, last: rulUnder(from) };
+    render(); requestAnimationFrame(rulLoop);
+  } catch (e) { console.warn('ruleta', e); } finally { S.rulBusy = false; }
 }
 
 /* fin de temporada: un día de descanso y la siguiente arranca sola */
@@ -704,7 +819,8 @@ function render() {
 function header() {
   const my = D?.my, cash = my ? D.fin(D.myIdx).cash : null;
   const title = my ? `<span>${crest(my, 38)}</span><span><b>${esc(my.name)}</b><small>${esc(S.cfg.name)} · T${D.Sx} · J${Math.min(D.revealed.length + (D.live.length ? 1 : 0), D.total)}/${D.total}</small></span>` : `<span><b>${esc(S.cfg?.name || 'Liga de Amigos')}</b><small>${D ? 'Temporada ' + D.Sx + ' · ' + D.n + ' equipos' : 'Fútbol manager entre amigos'}</small></span>`;
-  const nAuc = newAuctions() + (D && D.my && packState(D.my).freeOk ? 1 : 0), tabs = D ? `<nav class="tabs">${[['inicio', 'Inicio'], ['equipo', 'Equipo'], ['liga', 'Liga'], ['mercado', 'Mercado'], ['club', 'Club']].map(([k, l]) => `<button data-act="view" data-arg="${k}" aria-current="${S.view === k}">${NAV[k]}${l}${k === 'mercado' && nAuc ? `<span class="nbadge" aria-label="${nAuc} subastas nuevas">${nAuc}</span>` : ''}</button>`).join('')}</nav>` : '';
+  const vales = D && D.my ? Object.values((D.my.packs || {}).vale || {}).reduce((a, n) => a + (n > 0 ? n : 0), 0) : 0, nRul = D && D.my && rulState(D.my).freeOk ? 1 : 0;
+  const nAuc = newAuctions() + vales + (D && D.my && packState(D.my).freeOk ? 1 : 0), tabs = D ? `<nav class="tabs">${[['inicio', 'Inicio'], ['equipo', 'Equipo'], ['liga', 'Liga'], ['mercado', 'Mercado'], ['club', 'Club']].map(([k, l]) => `<button data-act="view" data-arg="${k}" aria-current="${S.view === k}">${NAV[k]}${l}${k === 'mercado' && nAuc ? `<span class="nbadge" aria-label="${nAuc} subastas nuevas">${nAuc}</span>` : ''}${k === 'inicio' && nRul ? '<span class="nbadge" aria-label="Tirada gratis en la ruleta">1</span>' : ''}</button>`).join('')}</nav>` : '';
   return `<header class="top"><div class="row"><div class="club">${title}</div>${cash != null ? `<button class="tokchip" data-act="go" data-arg="club:tok" aria-label="Tokens: ${D.tok(D.myIdx)}">${IC.gem}${D.tok(D.myIdx)}</button><div class="cash ${cash < 0 ? 'neg' : ''}" aria-label="Caja">${IC.coin}${money(cash)}</div>` : ''}</div>${tabs}</header>`;
 }
 function body() {
@@ -786,7 +902,7 @@ function homeView() {
   const cash = D.fin(D.myIdx).cash; if (cash < 0) avisos.push(`<li><b class="neg-amt">Saldo negativo.</b> Vende algún jugador o los salarios te hundirán.</li>`);
   const rows = D.table, myPos = rows.findIndex(r => r.t === D.myIdx);
   const show = rows.filter((r, k) => k < 4 || Math.abs(k - myPos) <= 1);
-  return `<div class="grid"><div class="stackp">${main}${objectiveHTML()}${upcomingHTML()}${last ? `<section class="panel"><div class="ph"><h3>Último partido · J${lastDoc.md}</h3><button class="btn sm" data-act="match" data-arg="${lastDoc.season}-${lastDoc.md}-${lastDoc.m.indexOf(last)}">${IC.play}Ver partido</button></div>${matchRow(last, lastDoc, lastDoc.m.indexOf(last))}</section>` : ''}</div>
+  return `<div class="grid"><div class="stackp">${main}${rulCard()}${objectiveHTML()}${upcomingHTML()}${last ? `<section class="panel"><div class="ph"><h3>Último partido · J${lastDoc.md}</h3><button class="btn sm" data-act="match" data-arg="${lastDoc.season}-${lastDoc.md}-${lastDoc.m.indexOf(last)}">${IC.play}Ver partido</button></div>${matchRow(last, lastDoc, lastDoc.m.indexOf(last))}</section>` : ''}</div>
   <div class="stackp"><section class="panel"><div class="ph"><h3>Clasificación</h3><button class="btn sm ghost" data-act="go" data-arg="liga:tabla">Completa</button></div>${tableHTML(show, true)}</section>${prensaHTML()}${muroHTML(4)}
   <section class="panel"><h3>Avisos del míster</h3>${avisos.length ? `<ul class="small" style="padding-left:18px;margin:8px 0 0">${avisos.join('')}</ul>` : '<p class="mute small">Todo en orden, míster.</p>'}</section></div></div>`;
 }
@@ -1136,6 +1252,7 @@ function modal() {
   const m = S.modal; document.body.dataset.tutonav = m && m.type === 'tuto' ? (tutoSteps()[m.i].nav || '') : ''; if (!m) return '';
   if (m.type === 'tuto') return tutoHTML(m.i);
   let inner = '';
+  if (m.type === 'ruleta') return rulModal(m);
   if (m.type === 'pack') return `<div class="ov pack-ov"><div class="pack-sheet" role="dialog" aria-modal="true" aria-label="Abriendo ${PACKS[m.kind].name}">${packModal(m)}</div></div>`;
   if (m.type === 'player') inner = playerModal(m.id);
   if (m.type === 'auction') { const p = E.player(m.id), v = E.pval(m.id, D.Sx, D.my.xp?.[m.id] || 0); let dv = 720; try { dv = +localStorage.getItem('auc-dur') || 720; } catch (e) {}
@@ -1295,9 +1412,12 @@ const ACT = {
   },
   friendly: () => { S.modal = { type: 'friendly' }; render(); },
   pack: a => { const [k, pay] = a.split(':'); openPack(k, pay); },
+  rulopen: () => { S.modal = { type: 'ruleta', phase: 'idle' }; render(); },
+  rulspin: (a, el) => { if (el.getAttribute('aria-disabled') === 'true') { const st = rulState(D.my); return toast(a === 'free' ? 'La tirada gratis vuelve mañana' : st.paid >= RUL_MAXPAID ? 'Ya no quedan tiradas extra hoy' : S.modal?.phase === 'spin' ? 'Espera a que pare' : 'No tienes tokens suficientes'); } rulSpin(a); },
+  rulok: () => { S.modal = { type: 'ruleta', phase: 'idle' }; render(); },
   noticia: id => { S.modal = { type: 'noticia', id }; render(); },
   playfriendly: () => { const rival = +$('#f-rival').value, view = $('#f-view').value, sp = $('#f-speed').value; const fr = E.simulateFriendly(S.cfg, D.teams, D.myIdx, rival, D.Sx, D.cur, Date.now() + ':' + Math.random()), ords = []; const m = fr.m; try { localStorage.setItem('mv-view', view); } catch (e) {} S.modal = null; render(); const manage = { side: 0, bench: fr.pre.side[0].bench, onOrder: o => { ords.push({ ...o, s: 0, t: Date.now() }); VW && VW.update(E.resultFromPre(fr.pre, ords)); toast(o.k === 'sub' ? 'Cambio hecho' : 'Táctica cambiada'); } }; openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), live: null, view, speed: sp === 'h' ? 4 : +sp, highlights: sp === 'h', summary: endSummary('friendly'), manage }); },
-  close: () => { S.modal = null; S.rp = null; render(); },
+  close: () => { const m = S.modal; if (m && m.type === 'ruleta' && m.phase === 'spin') { S.rulRot = m.to % 360; toast('Te ha tocado: ' + RUL[m.win].n); } S.modal = null; S.rp = null; render(); },
   tuto: i => { S.modal = { type: 'tuto', i: +i }; render(); document.querySelector('.tuto-card .btn.y')?.focus(); },
   tutoend: to => { S.modal = null; if (D.my && !D.my.tuto) saveTeam(D.my.id, { tuto: 1 }); if (to === 'club') { S.view = 'club'; S.csub = 'club'; } render(); window.scrollTo(0, 0); },
   tgcopy: async () => { const w = WEB(); if (!w) return; try { await navigator.clipboard.writeText('/vincular ' + w.code); toast('Copiado: pégalo en el grupo de Telegram'); } catch (e) { toast('Escribe en el grupo: /vincular ' + w.code); } },

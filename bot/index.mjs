@@ -103,6 +103,7 @@ function watch(code) {
   col('sorteos', q => q.docs.forEach(d => { lg.sorteos[d.id] = dec(d.data()); }));
   col('subastas', q => { q.docs.forEach(d => { lg.auc[d.id] = dec(d.data()); }); q.docChanges().forEach(ch => aucNews(lg, ch.type, ch.doc.id, dec(ch.doc.data()))); });
   col('sobres', q => q.docChanges().forEach(ch => { if (ch.type === 'added') packNews(lg, ch.doc.id, dec(ch.doc.data())); }));
+  col('ruleta', q => q.docChanges().forEach(ch => { if (ch.type === 'added') rulNews(lg, ch.doc.id, dec(ch.doc.data())); }));
   col('miembros', q => q.docs.forEach(d => { lg.mem[d.id] = d.data(); }));
   const store = (k, name) => col(name, q => {
     q.docs.forEach(d => { lg[k][d.id] = dec(d.data()); });
@@ -164,14 +165,14 @@ function humanPairs(lg, ev) {
 }
 
 /* ---------- limpieza diaria: que la base de datos y el disco no crezcan sin fin ---------- */
-const DAYMS = 86400000, KEEP = { noticias: 30, subastas: 7, sobres: 14 };
+const DAYMS = 86400000, KEEP = { noticias: 30, subastas: 7, sobres: 14, ruleta: 14 };
 async function delMany(refs) { let n = 0; for (let i = 0; i < refs.length; i += 20) { const r = await Promise.allSettled(refs.slice(i, i + 20).map(x => deleteDoc(x))); n += r.filter(x => x.status === 'fulfilled').length; } return n; }
 async function prune(lg) {
   const now = Date.now(), P = 'ligas/' + lg.code + '/', out = {};
   try {
     const oldAuc = Object.entries(lg.auc).filter(([, a]) => a && a.status !== 'open' && (a.ends || a.t || 0) < now - KEEP.subastas * DAYMS).map(([id]) => id);
     out.subastas = await delMany(oldAuc.map(id => doc(db, P + 'subastas/' + id))); oldAuc.forEach(id => { delete lg.auc[id]; });
-    for (const name of ['sobres', 'noticias']) {
+    for (const name of ['sobres', 'ruleta', 'noticias']) {
       const q = await getDocs(collection(db, P + name)), old = q.docs.filter(d => { const t = Number(dec(d.data()).t) || 0; return t < now - KEEP[name] * DAYMS; });
       if (name === 'noticias') old.forEach(d => { const img = dec(d.data()).img; if (typeof img === 'string' && /^\/noticias\/[\w-]+\.jpg$/.test(img)) fs.rm(path.join(NEWS_DIR, path.basename(img)), { force: true }, () => {}); });
       out[name] = await delMany(old.map(d => d.ref));
@@ -591,6 +592,19 @@ function packNews(lg, id, x) {
     if (crack && !crack.sold) queueNews(chat, () => NEWS.fichaje(lg, t.idx, E.player(crack.pid).name, E.pval(crack.pid, lg.cfg.season, 0), 'Sobre de oro'), 20000);
   });
 }
+const RUL_N = ['0,5 M€', '1 token', 'un bono de forma', '1 M€', 'un bono de curación', '3 tokens', 'un entreno extra', '3 M€', 'un sobre de plata', 'un SOBRE DE ORO'];
+function rulNews(lg, id, x) { // solo los premios gordos, para no llenar el grupo
+  const chat = chatOf(lg.code); if (!chat || !x || !x.t || x.t < lg.boot - 60000 || !lg.cfg) return;
+  const t = lg.teams[x.team], k = Number(x.premio); if (!t || !(k in RUL_N) || ![5, 7, 8, 9].includes(k)) return;
+  once(lg.code + ':rul:' + id, () => send(chat, k === 9 ? `🎰🚨 <b>¡¡PREMIO GORDO EN LA RULETA!!</b> A ${who(lg, t.idx)} le ha tocado <b>${RUL_N[k]}</b>. Alguien que le vigile 👀` : `🎰 ${who(lg, t.idx)} gira la ruleta y se lleva <b>${RUL_N[k]}</b>${x.paid ? ' (pagando tokens, que se nota que le sobran)' : ''}.`));
+}
+function announceRuleta(code) {
+  const chat = chatOf(code); if (!chat) return;
+  once(code + ':ann:ruleta', () => {
+    send(chat, `🎰 <b>NOVEDAD: LLEGA LA RULETA DIARIA</b>\n\nEn el juego, en <b>Inicio → Ruleta diaria</b>.\n\n🆓 <b>1 tirada GRATIS cada día</b>\n💎 Hasta 3 tiradas más por <b>2 tokens</b> cada una\n\nPremios:\n💰 0,5 M€, 1 M€ o 3 M€\n💎 1 o 3 tokens\n🎟️ Bonos: forma al 100%, curar una lesión o entreno extra\n🥈 Sobre de plata\n🥇 <b>Sobre de oro</b> (el premio gordo, 1%)\n\nLas probabilidades están en la propia ruleta. Se paga con tokens del juego, nunca con dinero real. Y si a alguien le toca el gordo, lo cuento aquí 😏\n${SITE}`);
+    queueNews(chat, async () => ({ kind: 'ruleta', caption: '🎰 Novedad: llega la ruleta diaria', data: {} }), 5000);
+  });
+}
 function announcePacks(code) {
   const chat = chatOf(code); if (!chat) return;
   once(code + ':ann:sobres', () => {
@@ -642,6 +656,7 @@ if (ST.groq) setAIKey(ST.groq);
 await tg('setMyCommands', { commands: [{ command: 'vincular', description: 'Vincular este chat a una liga (código de 6 letras)' }, { command: 'proximos', description: 'Próximos partidos' }, { command: 'tabla', description: 'Clasificación' }, { command: 'pique', description: 'Que el bot pique al grupo' }, { command: 'noticias', description: 'Noticias de la liga' }, { command: 'noticia', description: 'Una noticia en imagen de la prensa de la liga' }, { command: 'desvincular', description: 'Dejar de recibir avisos aquí' }] });
 for (const code in ST.leagues) watch(code);
 setTimeout(() => { for (const code in ST.leagues) announcePacks(code); }, 30000);
+setTimeout(() => { for (const code in ST.leagues) announceRuleta(code); }, 150000);
 setInterval(tick, 30000); setTimeout(tick, 5000);
 poll();
 console.log('Bot en marcha');

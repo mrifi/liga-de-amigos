@@ -71,6 +71,18 @@ const T = {
     return `<section class="c pt" id="nS"><span class="k">NOVEDAD</span><h1>Llegan los <em>sobres</em></h1><div class="sub">Jugadores, cracks, dinero, tokens y bonos</div>
     <div class="row">${[['bronce', 'Bronce', '1 premio', 'GRATIS', 'cada día'], ['plata', 'Plata', '2 premios', '3 tokens', 'promesas y titulares'], ['oro', 'Oro', '3 premios', '8 tokens o 15 M€', '5% de crack 86+']].map(([k, n, p, pr, x]) => `<div class="col">${art(k, n, p)}<b>${n}</b><span>${pr}</span><small>${x}</small></div>`).join('')}</div>
     <div class="foot">Ábrelos en <b>Mercado → Sobres</b></div></section>`; },
+  ruleta: () => {
+    const L = [['0,5 M€', 3], ['1 TOKEN', 5], ['FORMA', 7], ['1 M€', 3], ['CURA', 8], ['3 TOKENS', 6], ['ENTRENO', 9], ['3 M€', 4], ['PLATA', 10], ['ORO', 11]], R = 152, SL = 36;
+    const pt = (a, r) => [200 + r * Math.sin(a * Math.PI / 180), 200 - r * Math.cos(a * Math.PI / 180)].map(v => v.toFixed(1));
+    const fill = i => i === 9 ? ['#ff5a74', '#a3112f'] : i === 8 ? ['#eef2f8', '#7c8aa2'] : i % 2 ? ['#25c486', '#07603f'] : ['#3d74ff', '#10297a'];
+    let defs = '', body = '';
+    L.forEach(([s, im], i) => { const [a, b] = fill(i), [x0, y0] = pt(i * SL, R), [x1, y1] = pt(i * SL + SL, R);
+      defs += `<radialGradient id="g${i}" cx="200" cy="200" r="${R}" gradientUnits="userSpaceOnUse"><stop offset=".15" stop-color="${b}"/><stop offset=".7" stop-color="${a}"/><stop offset="1" stop-color="${b}"/></radialGradient>`;
+      body += `<path d="M200 200L${x0} ${y0}A${R} ${R} 0 0 1 ${x1} ${y1}Z" fill="url(#g${i})"/><g transform="rotate(${i * SL + SL / 2} 200 200)"><image href="../img/ruleta/r${im}.webp" x="170" y="88" width="60" height="60"/><text x="200" y="78" text-anchor="middle" font-family="Anton" font-size="${s.length > 6 ? 13 : 16}" fill="${i === 8 ? '#1b2537' : '#fff'}" stroke="rgba(0,0,0,.45)" stroke-width="${i === 8 ? 0 : 2}" paint-order="stroke">${s}</text></g>`; });
+    L.forEach((_, i) => { const [x, y] = pt(i * SL, R); body += `<line x1="200" y1="200" x2="${x}" y2="${y}" stroke="#f9d97c" stroke-width="2.4"/>`; });
+    return `<section class="c pt" id="nR"><span class="k">NOVEDAD</span><h1>Llega la <em>ruleta</em></h1><div class="sub">Una tirada gratis cada día</div>
+    <div class="wh"><svg viewBox="0 0 400 400" style="transform:rotate(-18deg)"><defs>${defs}</defs>${body}</svg><img class="rg" src="../img/ruleta/r0.webp"><img class="hb" src="../img/ruleta/r2.webp"><img class="pp" src="../img/ruleta/r1.webp"></div>
+    <div class="foot">Gira en <b>Inicio → Ruleta diaria</b> · extra por 2 tokens</div></section>`; },
   expectativa: d => `<section class="c sq" id="n14"><div class="p p1"><span class="lb">Expectativa</span><b>${esc(d.e)}</b></div><div class="mid"></div><div class="p p2"><span class="lb">Realidad</span><b>${esc(d.r)}</b></div><div class="by">vía Kevin Golazos 😎</div></section>`
 };
 // titular en dos colores: lo que va entre *asteriscos* sale en amarillo
