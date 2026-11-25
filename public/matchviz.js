@@ -1128,7 +1128,7 @@
     let fxOn = !reduced; try { const v = localStorage.getItem('mv-fx'); if (v != null) fxOn = v === '1'; } catch (e) {}
     let trauma = 0, shakeT = 0, prevR = null, lastScore = '0-0', burstEv = null;
     SND.init();
-    let mode = o.live ? 'live' : 'replay', r = o.live ? clamp((Date.now() - o.live.at) / 1000, 0, LIVE_S + 8) : (o.startR || 0), speed = o.speed || 4, high = !!o.highlights, view = o.view || '2d', r2 = null, r3 = null, raf = 0, last = performance.now(), snap = true, dead = false, lastPanel = -1, paused = false;
+    let mode = o.live ? 'live' : 'replay', r = o.live ? clamp((Date.now() - o.live.at) / 1000, 0, LIVE_S + 8) : (o.startR || 0), speed = o.speed || 4, high = !!o.highlights, view = o.view || '2d', r2 = null, r3 = null, raf = 0, last = performance.now(), snap = true, dead = false, lastPanel = -1, paused = false, draft = {}, pendT = 0, pendMin = 0;
     root.innerHTML = `<div class="mv">
       <div class="mv-top"><div class="mv-t">${o.crest(o.H, 36)}<b>${esc(o.H.short)}</b></div><div class="mv-sc"><span class="mv-score">0-0</span><span class="mv-clk">0'</span></div><div class="mv-t r"><b>${esc(o.A.short)}</b>${o.crest(o.A, 36)}</div></div>
       <div class="mv-stage"><div class="mv-r2"></div><div class="mv-r3"></div><div class="mv-flash"></div><div class="mv-ban" aria-live="polite"></div><div class="mv-load" style="display:none">Cargando estadio 3D…</div>
@@ -1158,6 +1158,9 @@
       try { localStorage.setItem('mv-view', v); } catch (e) {}
       snap = true; if (el.ctrl.innerHTML) el.ctrl.innerHTML = ctrlHTML();
     }
+    // lo que el míster elige en los desplegables se guarda al momento (Safari quita el foco al elegir y el panel se redibuja)
+    const keepDraft = e => { const g = e.target && e.target.dataset && e.target.dataset.g; if (g && e.target.tagName === 'SELECT') draft[g] = e.target.value; };
+    root.addEventListener('change', keepDraft); root.addEventListener('input', keepDraft);
     root.addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b || !root.contains(b)) return;
       if (b.dataset.v) setView(b.dataset.v);
@@ -1169,8 +1172,8 @@
       if (b.dataset.o === 'rig' && r3) { r3.setRig(!r3.rig); el.ctrl.innerHTML = ctrlHTML(); }
       if (b.dataset.o === 'hd' && r3) { r3.setHD(!r3.hd); el.ctrl.innerHTML = ctrlHTML(); }
       const a = b.dataset.act2;
-      if (a === 'applytac' && MG) { const g = k => root.querySelector(`[data-g="${k}"]`).value; const mm = Math.min(93, minuteAt(r) + 1); MG.onOrder({ k: 'tac', tac: { ment: g('ment'), press: g('press'), est: g('est') }, m: mm }); const f = g('form'); let fNow = m.fm[MG.side]; for (const e of m.ev) if (e.t === 'tac' && e.s === MG.side && e.form && e.m <= minuteAt(r)) fNow = e.form; if (f !== fNow) MG.onOrder({ k: 'form', form: f, m: mm }); lastPanel = -1; }
-      if (a === 'dosub' && MG) { const out = root.querySelector('[data-g="out"]').value, inn = root.querySelector('[data-g="in"]').value; if (out && inn) MG.onOrder({ k: 'sub', out, in: inn, m: Math.min(93, minuteAt(r) + 1) }); lastPanel = -1; }
+      if (a === 'applytac' && MG) { const g = k => draft[k] ?? root.querySelector(`[data-g="${k}"]`).value; pendT = Date.now(); pendMin = Math.min(93, minuteAt(r) + 1); const mm = Math.min(93, minuteAt(r) + 1); MG.onOrder({ k: 'tac', tac: { ment: g('ment'), press: g('press'), est: g('est') }, m: mm }); const f = g('form'); let fNow = m.fm[MG.side]; for (const e of m.ev) if (e.t === 'tac' && e.s === MG.side && e.form && e.m <= minuteAt(r)) fNow = e.form; if (f !== fNow) MG.onOrder({ k: 'form', form: f, m: mm }); lastPanel = -1; }
+      if (a === 'dosub' && MG) { const out = draft.out ?? root.querySelector('[data-g="out"]').value, inn = draft.in ?? root.querySelector('[data-g="in"]').value; if (out && inn) MG.onOrder({ k: 'sub', out, in: inn, m: Math.min(93, minuteAt(r) + 1) }); delete draft.out; delete draft.in; lastPanel = -1; }
       if (a === 'full') { const el2 = root.closest('.mvov') || root; try { (el2.requestFullscreen ? el2.requestFullscreen() : Promise.reject()).then(() => { try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch (e) {} }).catch(() => {}); } catch (e) {} }
       if (a === 'fromstart') { mode = 'replay'; r = 0; speed = 4; snap = true; el.ctrl.innerHTML = ctrlHTML(); }
       if (a === 'endclose') { el.end.hidden = true; }
@@ -1222,17 +1225,19 @@
         const entered = new Set(tl.side[s2].filter(p => p.from <= smp.r).map(p => p.id)), bench = (MG.bench || []).filter(id => !entered.has(id));
         const tacNow = (() => { let t = m.tc[s2]; for (const e of m.ev) if (e.t === 'tac' && e.s === s2 && e.tac && e.m <= mnow) t = e.tac; return t; })();
         const formNow = (() => { let f = m.fm[s2]; for (const e of m.ev) if (e.t === 'tac' && e.s === s2 && e.form && e.m <= mnow) f = e.form; return f; })();
+        if (pendT && ((['ment', 'press', 'est'].every(k => !draft[k] || draft[k] === tacNow[k]) && (!draft.form || draft.form === formNow)) || Date.now() - pendT > 40000)) { pendT = 0; ['ment', 'press', 'est', 'form'].forEach(k => delete draft[k]); }
+        const tv = k => draft[k] ?? tacNow[k], fv = draft.form ?? formNow;
         const opt = (obj, v) => Object.entries(obj).map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${l}</option>`).join('');
         const rt = id => m.rat[id] && mnow > 30 ? ` · ${m.rat[id] >= 7 ? '⬆' : m.rat[id] < 6 ? '⬇' : '='}` : '';
         el.panel.innerHTML = over ? '<p class="mv-note">El partido ha terminado.</p>' : `<div class="mv-ges">
-          <p class="mv-note">Lo que cambies se aplica desde el minuto ${Math.min(93, mnow + 1)}. Cambios hechos: ${used}/5.</p>
-          <div class="mv-grid"><label>Mentalidad<select data-g="ment">${opt({ def: 'Defensiva', equ: 'Equilibrada', ofe: 'Ofensiva' }, tacNow.ment)}</select></label>
-          <label>Presión<select data-g="press">${opt({ baj: 'Baja', med: 'Media', alt: 'Alta' }, tacNow.press)}</select></label>
-          <label>Estilo<select data-g="est">${opt({ pos: 'Posesión', mix: 'Mixto', dir: 'Directo', con: 'Contraataque' }, tacNow.est)}</select></label>
-          <label>Formación<select data-g="form">${Object.keys(E.FORMS).map(f => `<option ${f === formNow ? 'selected' : ''}>${f}</option>`).join('')}</select></label></div>
+          <p class="mv-note">${pendT ? `✅ Táctica enviada: entra en juego en el minuto ${pendMin}.` : `Lo que cambies se aplica desde el minuto ${Math.min(93, mnow + 1)}.`} Cambios hechos: ${used}/5.</p>
+          <div class="mv-grid"><label>Mentalidad<select data-g="ment">${opt({ def: 'Defensiva', equ: 'Equilibrada', ofe: 'Ofensiva' }, tv('ment'))}</select></label>
+          <label>Presión<select data-g="press">${opt({ baj: 'Baja', med: 'Media', alt: 'Alta' }, tv('press'))}</select></label>
+          <label>Estilo<select data-g="est">${opt({ pos: 'Posesión', mix: 'Mixto', dir: 'Directo', con: 'Contraataque' }, tv('est'))}</select></label>
+          <label>Formación<select data-g="form">${Object.keys(E.FORMS).map(f => `<option ${f === fv ? 'selected' : ''}>${f}</option>`).join('')}</select></label></div>
           <button class="mv-b on" data-act2="applytac">Aplicar táctica</button>
-          <h4>Cambio</h4><div class="mv-grid"><label>Sale<select data-g="out">${onF.filter(p => p.pos !== 'POR' || true).map(p => `<option value="${p.id}" ${gesSel && gesSel.out === p.id ? 'selected' : ''}>${p.num} · ${esc(E.player(p.id).name)} (${p.pos})${rt(p.id)}</option>`).join('')}</select></label>
-          <label>Entra<select data-g="in">${bench.map(id => `<option value="${id}">${esc(E.player(id).name)} (${E.player(id).pos})</option>`).join('') || '<option value="">Sin suplentes</option>'}</select></label></div>
+          <h4>Cambio</h4><div class="mv-grid"><label>Sale<select data-g="out">${onF.filter(p => p.pos !== 'POR' || true).map(p => `<option value="${p.id}" ${(draft.out ? draft.out === p.id : gesSel && gesSel.out === p.id) ? 'selected' : ''}>${p.num} · ${esc(E.player(p.id).name)} (${p.pos})${rt(p.id)}</option>`).join('')}</select></label>
+          <label>Entra<select data-g="in">${bench.map(id => `<option value="${id}" ${draft.in === id ? 'selected' : ''}>${esc(E.player(id).name)} (${E.player(id).pos})</option>`).join('') || '<option value="">Sin suplentes</option>'}</select></label></div>
           <button class="mv-b on" data-act2="dosub" ${used >= 5 || !bench.length ? 'disabled' : ''}>Hacer el cambio</button></div>`;
         return;
       }
