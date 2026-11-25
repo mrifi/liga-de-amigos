@@ -7,7 +7,7 @@ import path from 'node:path';
 import { initializeApp } from 'firebase/app';
 import { createNews, render as renderNews, setKey as setAIKey, testKey } from './news/news.mjs';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, doc, getDoc, setDoc, collection, onSnapshot } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc, deleteDoc, getDocs, collection, onSnapshot } from 'firebase/firestore';
 
 const TOKEN = process.env.BOT_TOKEN, SITE = process.env.SITE_URL || 'https://169-58-150-135.sslip.io';
 const STATE_F = process.env.STATE_F || '/data/state.json', TZ = 'Europe/Madrid';
@@ -163,9 +163,31 @@ function humanPairs(lg, ev) {
   });
 }
 
+/* ---------- limpieza diaria: que la base de datos y el disco no crezcan sin fin ---------- */
+const DAYMS = 86400000, KEEP = { noticias: 30, subastas: 7, sobres: 14 };
+async function delMany(refs) { let n = 0; for (let i = 0; i < refs.length; i += 20) { const r = await Promise.allSettled(refs.slice(i, i + 20).map(x => deleteDoc(x))); n += r.filter(x => x.status === 'fulfilled').length; } return n; }
+async function prune(lg) {
+  const now = Date.now(), P = 'ligas/' + lg.code + '/', out = {};
+  try {
+    const oldAuc = Object.entries(lg.auc).filter(([, a]) => a && a.status !== 'open' && (a.ends || a.t || 0) < now - KEEP.subastas * DAYMS).map(([id]) => id);
+    out.subastas = await delMany(oldAuc.map(id => doc(db, P + 'subastas/' + id))); oldAuc.forEach(id => { delete lg.auc[id]; });
+    for (const name of ['sobres', 'noticias']) {
+      const q = await getDocs(collection(db, P + name)), old = q.docs.filter(d => { const t = Number(dec(d.data()).t) || 0; return t < now - KEEP[name] * DAYMS; });
+      if (name === 'noticias') old.forEach(d => { const img = dec(d.data()).img; if (typeof img === 'string' && /^\/noticias\/[\w-]+\.jpg$/.test(img)) fs.rm(path.join(NEWS_DIR, path.basename(img)), { force: true }, () => {}); });
+      out[name] = await delMany(old.map(d => d.ref));
+    }
+    console.log('limpieza', lg.code, JSON.stringify(out));
+  } catch (e) { console.warn('limpieza', lg.code, e.message); }
+}
+function pruneFiles() { // imágenes huérfanas (por si falló guardar el documento)
+  fs.readdir(NEWS_DIR, (e, files) => { if (e) return; const lim = Date.now() - (KEEP.noticias + 5) * DAYMS;
+    files.forEach(f => { const fp = path.join(NEWS_DIR, f); fs.stat(fp, (e2, st) => { if (!e2 && st.isFile() && st.mtimeMs < lim) fs.rm(fp, { force: true }, () => {}); }); }); });
+}
+
 /* ---------- avisos por tiempo ---------- */
 function tick() {
   const now = Date.now();
+  { const [dk0, hr0] = madrid(now); if (hr0 >= 4 && hr0 < 7) once('files:prune:' + dk0, pruneFiles); }
   for (const code in ST.leagues) {
     const lg = L[code], chat = chatOf(code); if (!lg || !lg.cfg || !lg.cfg.started || !chat) continue;
     for (const ev of upcoming(lg)) {
@@ -180,6 +202,7 @@ function tick() {
     }
     drawTick(lg, chat, now);
     const [dk, hr] = madrid(now); if (hr >= 10 && hr < 12) once(code + ':dig:' + dk, () => send(chat, digest(lg)));
+    if (hr >= 4 && hr < 7) once(code + ':prune:' + dk, () => prune(lg));
     if (hr >= 13 && hr < 16 && (ST.newsDay?.[code] || 0) < now - 20 * 3600000) once(code + ':news:' + dk, () => { ST.newsDay = { ...(ST.newsDay || {}), [code]: now }; save(); queueNews(chat, () => dailyNews(lg), Math.floor(Math.random() * 40) * 60000); });
   }
 }
@@ -220,7 +243,6 @@ const humansIdx = lg => teamsArr(lg).map((t, i) => i).filter(i => isHuman(lg, i)
 const seasonDocs = (lg, maxMd = 1e9) => Object.values(lg.jor).filter(x => x.season === lg.cfg.season && x.fin && x.m && x.md <= maxMd).sort((a, b) => a.md - b.md);
 const tableOf = (lg, docs) => { const tb = E.table(lg.cfg.n, docs), pos = {}; tb.forEach((r, k) => { pos[r.t] = k + 1; }); return { tb, pos, row: i => tb.find(r => r.t === i) }; };
 const streak = (form, ch) => { let k = 0; for (let i = form.length - 1; i >= 0 && form[i] === ch; i--) k++; return k; };
-const surname = id => E.player(id).name.split(' ').slice(-1)[0];
 
 const T = {
   DERBY_WIN: [
@@ -393,7 +415,7 @@ const drawKicks = lg => [...Array(total(lg))].map((_, i) => kickAt(lg, i + 1));
 const clOn = lg => total(lg) >= 9;
 const clDrawAt = lg => E.drawTime(dayAt(lg, 3), drawKicks(lg));
 const cupRounds = lg => E.cupBracket(lg.cfg.n, lg.cfg.seed + ':' + lg.cfg.season).rounds;
-const cupDrawAt = lg => { const R = cupRounds(lg), T = total(lg), step = 4 * R <= T - 3 ? 4 : 2; return E.drawTime(dayAt(lg, Math.min(T, 4)), drawKicks(lg)); };
+const cupDrawAt = lg => E.drawTime(dayAt(lg, Math.min(total(lg), 4)), drawKicks(lg));
 const tAvg = (lg, t) => (t.squad || []).reduce((a, id) => a + E.ovr(id, lg.cfg.season, t.xp?.[id] || 0), 0) / Math.max(1, (t.squad || []).length);
 function clCompute(lg) {
   const c = lg.cfg, Sx = c.season, n = c.n, q = Math.min(4, Math.floor(n / 2)), T = teamsArr(lg);
@@ -570,7 +592,7 @@ function packNews(lg, id, x) {
   });
 }
 function announcePacks(code) {
-  const lg = L[code], chat = chatOf(code); if (!chat) return;
+  const chat = chatOf(code); if (!chat) return;
   once(code + ':ann:sobres', () => {
     send(chat, `🎁 <b>NOVEDAD: LLEGAN LOS SOBRES</b>\n\nYa podéis abrir sobres en el juego: <b>Mercado → Sobres</b>.\n\n🥉 <b>Bronce</b> · GRATIS cada día · 1 premio\n🥈 <b>Plata</b> · 3 tokens · 2 premios\n🥇 <b>Oro</b> · 8 tokens o 15 M€ · 3 premios (máx. 2 por semana)\n\nPueden salir:\n• Jugadores, desde suplentes hasta <b>cracks de 86+</b> (5% en el de oro, uno por temporada)\n• Promesas jóvenes\n• Dinero y tokens\n• Bonos: forma al 100%, curar una lesión o entreno extra, gratis\n\nSolo salen agentes libres, nunca jugadores de otro equipo, y las probabilidades están en el juego. Se pagan con tokens o dinero del juego, nunca con dinero real.\n\nY ojo: si alguien saca algo gordo, me entero y lo cuento aquí 😏\n${SITE}`);
     queueNews(chat, async () => ({ kind: 'sobres', caption: '🎁 Novedad: llegan los sobres', data: {} }), 5000);

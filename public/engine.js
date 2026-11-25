@@ -1,7 +1,7 @@
 /* Motor del juego: lógica pura, sin DOM. Todo es determinista a partir de semillas. */
 (function (G) {
   'use strict';
-  const SEG = 3, HOME_P = .03, PRES_P = .08, DAY = 86400000, LIVE_MS = 4 * 60000, BASE_YEAR = 2026, START_CASH = 40, TICKET = 45, SPONSOR = 0.6;
+  const SEG = 3, HOME_P = .03, PRES_P = .08, DAY = 86400000, LIVE_MS = 4 * 60000, BASE_YEAR = 2026, START_CASH = 40, TICKET = 45;
   const PRIZE = { w: 1.0, d: 0.45, l: 0.15 };
   // el club empieza en un campo municipal y crece con su afición (estilo Top Eleven)
   const STADIUM = [
@@ -611,7 +611,7 @@
     return [h, a];
   }
   function simulateCupRound(cfg, teams, pairs, S, round, at, state, lv) {
-    const n = teams.length, formOf = () => ({ mor: 1, fill: .6 }), m = [], pens = [], pres = [];
+    const formOf = () => ({ mor: 1, fill: .6 }), m = [], pens = [], pres = [];
     pairs.forEach(([h, a], k) => {
       const pre = buildPre(cfg, teams, h, a, S, 999, state, formOf, cfg.seed + ':copa:' + S + ':' + round + ':' + k, []);
       pre.side.forEach(sd => { sd.eco = { ...sd.eco, pm: 0, pw: 0, tie: 0, bar: 0, park: 0 }; sd.wage = 0; sd.eco.mant = 0; });

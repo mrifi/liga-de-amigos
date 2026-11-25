@@ -45,7 +45,6 @@ function stars(o) {
   for (let i = 1; i <= 5; i++) h += `<i class="st ${v >= i ? 'f' : v >= i - .5 ? 'h' : ''}"></i>`;
   return `<span class="stars" role="img" aria-label="${String(v).replace('.', ',')} estrellas">${h}</span>`;
 }
-const SVGI = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 const DUO = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 const NAV = {
   inicio: DUO('<path d="M3.5 20.5h17"/><path d="M5 20.5 6.6 12h10.8l1.6 8.5z" fill="currentColor" fill-opacity=".22"/><path d="M6.6 12 8 8.5h8l1.4 3.5"/><path d="M12 20.5V16"/><path d="M19.5 9.5V3.5M17.6 3.5h3.8"/><path d="M4.5 9.5V3.5M2.6 3.5h3.8"/>'),
@@ -287,7 +286,8 @@ async function ensureDailyAuctions() {
   const ref = S.db.doc('subastas/' + id0); const l = await ref.acquire({ holder: S.me || 'x', ttlMs: 10000 }); if (!l.acquired) return;
   if ((await ref.get()).data()?.pid) return;
   const r = E.rng('sub' + today() + S.cfg.seed), shuf = a => a.map(x => [r(), x]).sort((x, y) => x[0] - y[0]).map(x => x[1]);
-  const pool = E.freeAgents(D.owned).map(id => ({ id, o: ovrOf(id), a: E.age(E.player(id), D.Sx) })), used = new Set(), out = [];
+  const used = new Set(Object.values(S.auctions).filter(a => a.status === 'open').map(a => a.pid)), out = [];
+  const pool = E.freeAgents(D.owned).filter(id => !used.has(id)).map(id => ({ id, o: ovrOf(id), a: E.age(E.player(id), D.Sx) }));
   const take = (list, n, kind, f = .7) => { let k = 0; for (const x of shuf(list)) { if (k >= n) break; if (used.has(x.id)) continue; used.add(x.id); out.push({ pid: x.id, seller: null, kind, min: E.r1(E.pval(x.id, D.Sx, 0) * f) }); k++; } };
   const byO = [...pool].sort((a, b) => b.o - a.o);
   take(byO.slice(0, 40), 2, 'estrella');                                   // 2 cracks
@@ -306,12 +306,16 @@ async function ensureDailyAuctions() {
 const topBid = a => (a.bids || []).reduce((b, x) => (!b || x.amt > b.amt ? x : b), null);
 const nextBid = a => { const tb = topBid(a); return tb ? E.r1(tb.amt + Math.max(.5, tb.amt * .05)) : a.min; };
 async function bid(id) {
-  const a0 = S.auctions[id], amt = nextBid(a0), t = D.my;
+  const a0 = S.auctions[id], t = D.my; if (!a0 || !t) return;
+  if (a0.seller === t.id) return toast('No puedes pujar por tu propio jugador');
+  if (topBid(a0)?.team === t.id) return toast('Ya vas ganando esta subasta');
+  const amt = nextBid(a0);
   if (D.tok(D.myIdx) < 1) return toast('Pujar cuesta 1 token');
   if (!canAfford(amt)) return toast('No te llega el dinero');
   if (t.squad.length >= SQ_MAX) return toast('Tu plantilla está llena');
   const ref = S.db.doc('subastas/' + id); const l = await ref.acquire({ holder: S.me, ttlMs: 8000 }); if (!l.acquired) return toast('Otra puja entrando, prueba otra vez');
   const a = (await ref.get()).data(); if (!a || a.status !== 'open' || Date.now() > a.ends) return toast('La subasta ya ha terminado');
+  if (topBid(a)?.team === t.id) return toast('Ya vas ganando esta subasta');
   const amt2 = nextBid(a); if (!canAfford(amt2)) return toast('No te llega el dinero');
   const ends = a.ends - Date.now() < 60000 ? Date.now() + 60000 : a.ends;
   await write('subastas/' + id, () => ref.set({ ...a, bids: [...(a.bids || []), { team: t.id, amt: amt2, t: Date.now() }], ends }));
@@ -569,7 +573,7 @@ const wpick = list => { const tot = list.reduce((a, x) => a + x[1], 0); let r = 
 const isoWeek = () => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7); const w1 = new Date(d.getFullYear(), 0, 4); return d.getFullYear() + '-W' + (1 + Math.round(((d - w1) / 864e5 - 3 + (w1.getDay() + 6) % 7) / 7)); };
 const packState = t => { const pk = t.packs || {}; return { freeOk: pk.free !== today(), goldLeft: 2 - (pk.week === isoWeek() ? pk.gold || 0 : 0), crackUsed: pk.crack === D.Sx }; };
 function rollPack(kind, used) {
-  const t = D.my, st = packState(t), pool = E.freeAgents(D.owned).filter(id => !used.has(id)).map(id => ({ id, o: ovrOf(id), a: E.age(E.player(id), D.Sx) }));
+  const t = D.my, st = packState(t), inAuc = new Set(Object.values(S.auctions).filter(a => a.status === 'open').map(a => a.pid)), pool = E.freeAgents(D.owned).filter(id => !used.has(id) && !inAuc.has(id)).map(id => ({ id, o: ovrOf(id), a: E.age(E.player(id), D.Sx) }));
   const player = (f, tag) => { const c = pool.filter(x => !used.has(x.id) && f(x)); if (!c.length) return { k: 'dinero', v: 3 }; const x = c[Math.floor(rnd() * c.length)]; used.add(x.id); return { k: 'jugador', pid: x.id, o: x.o, tag }; };
   const cash = (a, b) => ({ k: 'dinero', v: E.r1(a + rnd() * (b - a)) });
   const item = () => ({ k: 'bono', it: wpick([['forma', 40], ['cura', 30], ['entreno', 30]]) });
@@ -583,7 +587,9 @@ function rollPack(kind, used) {
   return out;
 }
 async function openPack(kind, pay) {
-  const t = D.my, P = PACKS[kind], st = packState(t); if (!t || S.opening) return;
+  const t = D.my, P = PACKS[kind]; if (!t || !P || S.opening) return;
+  const st = packState(t);
+  if (kind !== 'bronce' && !(P.cost && P.cost[pay])) return; // solo formas de pago válidas para ese sobre
   if (kind === 'bronce' && !st.freeOk) return toast('Ya has abierto tu sobre gratis de hoy');
   if (kind === 'oro' && st.goldLeft <= 0) return toast('Ya has abierto 2 sobres de oro esta semana');
   if (pay === 'tok' && D.tok(D.myIdx) < P.cost.tok) return toast('No tienes tokens suficientes');
@@ -592,12 +598,12 @@ async function openPack(kind, pay) {
   try {
     const prizes = rollPack(kind, new Set()); let squad = [...t.squad], led = t.ledger || [], tok = t.tok || [], items = { ...(t.items || {}) };
     const pk = { ...(t.packs || {}) }; if (kind === 'bronce') pk.free = today(); if (kind === 'oro') { pk.gold = (pk.week === isoWeek() ? pk.gold || 0 : 0) + 1; pk.week = isoWeek(); }
-    if (pay === 'tok') tok = [...tok, { n: -P.cost.tok, why: P.name, d: Date.now() }].slice(-200);
+    if (pay === 'tok') tok = tokAdd({ tok }, -P.cost.tok, P.name);
     if (pay === 'cash') led = ledgerAdd({ ledger: led }, -P.cost.cash, P.name);
     for (const x of prizes) {
       if (x.k === 'jugador') { if (x.tag === 'crack') pk.crack = D.Sx; if (squad.length >= SQ_MAX) { x.sold = E.r1(E.pval(x.pid, D.Sx, 0) * .8); led = ledgerAdd({ ledger: led }, x.sold, 'Sobre (plantilla llena): ' + E.player(x.pid).name); } else { squad.push(x.pid); led = ledgerAdd({ ledger: led }, 0, 'Sobre: ' + E.player(x.pid).name); } }
       if (x.k === 'dinero') led = ledgerAdd({ ledger: led }, x.v, P.name + ': premio');
-      if (x.k === 'tokens') tok = [...tok, { n: x.v, why: P.name, d: Date.now() }].slice(-200);
+      if (x.k === 'tokens') tok = tokAdd({ tok }, x.v, P.name);
       if (x.k === 'bono') items[x.it] = (items[x.it] || 0) + 1;
     }
     await saveTeam(t.id, { squad, ledger: led, tok, items, packs: pk });
@@ -1069,7 +1075,9 @@ function clubView() {
   return html;
 }
 function yesterday() { const d = new Date(Date.now() - DAY); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
-const tokAdd = (t, n, why) => [...(t.tok || []), { n, why, d: Date.now() }].slice(-200);
+// los saldos (dinero y tokens) se calculan sumando estos registros: al recortar, lo recortado se suma en una línea de "saldo anterior" para que el saldo no cambie
+const capLog = (arr, max, k) => { if (arr.length <= max) return arr; const cut = arr.slice(0, arr.length - max + 1); return [{ d: cut[cut.length - 1].d || 0, [k]: E.r1(cut.reduce((a, x) => a + (+x[k] || 0), 0)), why: 'Saldo anterior', carry: true }, ...arr.slice(arr.length - max + 1)]; };
+const tokAdd = (t, n, why) => capLog([...(t.tok || []), { n, why, d: Date.now() }], 200, 'n');
 function spendTok(n, why, patch) { const t = D.my; if (D.tok(D.myIdx) < n) { toast('No tienes tokens suficientes'); return null; } return saveTeam(t.id, { ...patch, tok: tokAdd(t, -n, why) }); }
 /* ---------- versión web (Firebase): código de la liga ---------- */
 const WEB = () => window.LIGA_WEB || null;
@@ -1213,7 +1221,7 @@ function openViewer(opts) {
 function closeViewer(silent) { if (!VW) return; VW.destroy(); VW.el.remove(); VW = null; document.body.style.overflow = ''; if (silent === true) return; render(); const back = opener && opener.id ? document.getElementById(opener.id) : null; (back || document.querySelector('nav.tabs [aria-current=true]'))?.focus(); }
 /* ---------- acciones de mercado ---------- */
 async function lockPlayer(pid) { const l = await S.db.doc('bloqueos/p-' + pid).acquire({ holder: S.me, ttlMs: 10000 }); return l.acquired; }
-const ledgerAdd = (t, amt, why) => [...(t.ledger || []), { d: Date.now(), amt: E.r1(amt), why }].slice(-150);
+const ledgerAdd = (t, amt, why) => capLog([...(t.ledger || []), { d: Date.now(), amt: E.r1(amt), why }], 150, 'amt');
 async function buyFree(pid) {
   const v = E.pval(pid, D.Sx, 0), t = D.my;
   if (!canAfford(v) || t.squad.length >= SQ_MAX) return;

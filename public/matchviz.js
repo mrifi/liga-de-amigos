@@ -100,18 +100,6 @@
     const all = Object.values(P); all.forEach((p, i) => { p.i = i; });
     const SHORT = LIVE_S < 600, CEL = SHORT ? 3.6 : 6, KOD = SHORT ? 1.4 : 2.6;
     const LEAD0 = pl => pl.type === 'goal' || pl.type === 'miss' || pl.type === 'save' ? (pl.k === 'pen' ? 2 : pl.k === 'fal' ? 4 : pl.k === 'con' ? 7 : 8.5) : pl.type === 'corner' ? 4.4 : pl.type === 'pen' ? 6 : pl.type === 'inj' ? 1.5 : pl.type === 'off' ? 4 : 3.4;
-    function lightPlay(pl) {
-      const T = pl.t, s = pl.s;
-      if (pl.type === 'save') { banners.push({ t: T, d: 2.2, type: 'save', s, p: pl.p, gk: pl.g }); say(T, 'Disparo de ' + nm(pl.p) + (pl.g ? ' y para ' + nm(pl.g) + '.' : ', lo saca la defensa.'), true); }
-      else if (pl.type === 'miss') { banners.push({ t: T, d: 2.2, type: pl.post ? 'pal' : 'miss', s, p: pl.p }); say(T, pl.post ? '¡Al palo! ' + nm(pl.p) + ' estaba cerca.' : 'Disparo de ' + nm(pl.p) + ' que se marcha fuera.', !!pl.post); }
-      else if (pl.type === 'tackle') { banners.push({ t: T, d: 1.6, type: pl.slide ? 'seg' : 'rob', s, p: pl.p, q: pl.q }); say(T, (pl.slide ? 'Entrada a ras de césped de ' : 'Robo de ') + nm(pl.p) + '.'); }
-      else if (pl.type === 'drib') { banners.push({ t: T, d: 1.5, type: 'reg', s, p: pl.p, q: pl.q }); say(T, 'Regate de ' + nm(pl.p) + (pl.q ? ' a ' + nm(pl.q) : '') + '.'); }
-      else if (pl.type === 'corner') { banners.push({ t: T, d: 2, type: 'cor', s }); say(T, 'Córner.'); }
-      else if (pl.type === 'foul' && pl.card) { banners.push({ t: T, d: 3, type: pl.card, s, p: pl.p }); say(T, (pl.card === 'roja' ? '¡Roja! ' : 'Falta y amarilla para ') + E.player(pl.p).name + '.', true); }
-      else if (pl.type === 'foul') { banners.push({ t: T, d: 1.8, type: 'fal', s, p: pl.p, q: pl.q }); say(T, 'Falta de ' + nm(pl.p) + (pl.q ? ' sobre ' + nm(pl.q) : '') + '.'); }
-      else if (pl.type === 'off') { banners.push({ t: T, d: 1.8, type: 'off', s, p: pl.p }); say(T, 'Fuera de juego de ' + nm(pl.p) + '.'); }
-      else if (pl.type === 'inj') { banners.push({ t: T, d: 3, type: 'les', s, p: pl.p }); say(T, E.player(pl.p).name + ' se duele en el césped.', true); }
-    }
     // partido corto (directo de pocos minutos): solo se escenifican las jugadas importantes; el resto va al relato y a los avisos
     const silent = []; let dbgShort = null;
     if (LIVE_S < 600 && m.v === 2) {
@@ -1121,7 +1109,6 @@
     play: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/></svg>',
     pause: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z" fill="currentColor"/></svg>'
   };
-  const ICON = { goal: VI.ball, ama: '', roja: '', les: VI.med, sub: VI.sub, save: VI.glove, miss: '' };
   function mount(root, o) {
     let m = o.match, tl = build(m), mot = Motion(tl); const kit = kits(o.H, o.A), esc = o.esc, MG = o.manage || null;
     const reduced = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } })();

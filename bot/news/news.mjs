@@ -9,8 +9,6 @@ const CSS = fs.readFileSync(path.join(DIR, 'style.css'), 'utf8');
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const pick = a => a[Math.floor(Math.random() * a.length)];
 const clip = (s, n) => { s = String(s ?? '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; };
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-const BG = ['stadium', 'grada', 'vestuario', 'trofeo', 'entreno', 'despacho'];
 const bgUrl = n => `url(../img/${n}.webp)`;
 const fmtM = v => (v >= 1 ? (Math.round(v * 10) / 10).toString().replace('.', ',') + ' M€' : Math.round(v * 1000) + ' mil €');
 const fechaLarga = t => new Date(t).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Europe/Madrid' }).replace(/^./, c => c.toUpperCase());
