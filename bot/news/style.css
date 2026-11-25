@@ -228,3 +228,30 @@ body{background:#111;font-family:P,'DejaVu Sans','Noto Color Emoji',sans-serif}
 #n14 .p b{font-size:40px;line-height:1.3;font-weight:700;text-shadow:0 3px 10px #000}
 #n14 .mid{height:14px;background:#fff}
 #n14 .by{position:absolute;right:30px;bottom:24px;font-size:22px;opacity:.75}
+
+/* sobres (anuncio) */
+#nS{background:#06102a;color:#fff;display:flex;flex-direction:column;align-items:center;padding:70px 50px}
+#nS:before{content:'';position:absolute;inset:0;background:url(../img/stadium.webp) center/cover;filter:blur(4px) brightness(.32)}
+#nS>*{position:relative}
+#nS .k{background:#e5484d;font-family:Anton;font-size:34px;letter-spacing:.12em;padding:6px 22px}
+#nS h1{font-family:Anton;font-size:118px;line-height:.95;text-align:center;margin-top:26px;text-transform:uppercase}
+#nS h1 em{font-style:normal;color:#ffd65a}
+#nS .sub{font-size:31px;color:#cdd6f2;margin-top:18px;text-align:center}
+#nS .row{display:flex;gap:34px;margin-top:90px;align-items:flex-end}
+#nS .col{width:300px;text-align:center}
+#nS .col>b{display:block;font-family:Anton;font-size:44px;margin-top:22px;text-transform:uppercase}
+#nS .col>span{display:block;font-size:26px;color:#ffd65a;font-weight:700;margin-top:4px}
+#nS .col>small{display:block;font-size:22px;color:#cdd6f2;margin-top:2px}
+#nS .foot{margin-top:auto;font-size:28px;font-weight:600;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:18px 30px}
+#nS .foot b{color:#ffd65a}
+.pack{container-type:inline-size;position:relative;width:100%;aspect-ratio:3/4.2;overflow:hidden;box-shadow:0 30px 60px rgba(0,0,0,.6)}
+.pack-bronce{background:linear-gradient(135deg,#ffd9b0,#c98a4b 22%,#8a5227 45%,#e0a56b 60%,#7a4520 80%,#d89a5c)}
+.pack-plata{background:linear-gradient(135deg,#ffffff,#cfd6de 20%,#8e9aa6 42%,#eef2f5 58%,#7d8893 78%,#dfe5ea)}
+.pack-oro{background:linear-gradient(135deg,#fff3c4,#e9c46a 18%,#b8862b 40%,#f7dc8b 55%,#a9781f 75%,#f3d27a)}
+.pack:before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(115deg,rgba(255,255,255,.07) 0 6px,transparent 6px 14px)}
+.pack:after{content:'';position:absolute;top:-20%;bottom:-20%;width:40%;left:35%;background:linear-gradient(100deg,transparent,rgba(255,255,255,.45),transparent);transform:skewX(-18deg)}
+.pack-in{position:absolute;inset:7cqw 5cqw;border:2px solid rgba(255,255,255,.55);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4cqw;color:#fff;text-shadow:0 2px 6px rgba(0,0,0,.35)}
+.pack-top{font-weight:700;font-size:6.2cqw;letter-spacing:.16em;white-space:nowrap}
+.pack-crest{width:40%}
+.pack-name{font-family:Anton;font-size:19cqw;line-height:1;text-transform:uppercase}
+.pack-n{font-size:6.5cqw;font-weight:700;letter-spacing:.14em;text-transform:uppercase}

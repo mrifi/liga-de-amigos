@@ -551,6 +551,98 @@ function aiBids(a) {
   return out.sort((x, y) => y.amt - x.amt).slice(0, 1);
 }
 
+
+/* ---------- sobres: premios al azar con tokens o dinero del juego (nunca dinero real) ---------- */
+const PACKS = {
+  bronce: { name: 'Sobre Bronce', n: 1, note: '1 gratis al día', cost: null },
+  plata: { name: 'Sobre Plata', n: 2, note: '3 tokens', cost: { tok: 3 } },
+  oro: { name: 'Sobre Oro', n: 3, note: '8 tokens o 15 M€ · máx. 2 por semana', cost: { tok: 8, cash: 15 } }
+};
+const PACK_ODDS = {
+  bronce: [['Jugador de 65-74', 40], ['1-3 M€', 35], ['1 token', 25]],
+  plata: [['Jugador de 75-82', 35], ['Promesa joven (≤21)', 15], ['3-6 M€', 25], ['2 tokens', 10], ['Bono (forma, cura o entreno)', 15]],
+  oro: [['1º premio: jugador de 80-85', 95], ['1º premio: CRACK de 86+ (1 por temporada)', 5], ['Otros: jugador de 76-84', 30], ['Otros: 6-12 M€', 30], ['Otros: 3-4 tokens', 15], ['Otros: bono', 25]]
+};
+const ITEM_N = { forma: 'Bono de forma', cura: 'Bono de curación', entreno: 'Entreno extra' };
+const rnd = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] / 4294967296; };
+const wpick = list => { const tot = list.reduce((a, x) => a + x[1], 0); let r = rnd() * tot; for (const x of list) { r -= x[1]; if (r <= 0) return x[0]; } return list[list.length - 1][0]; };
+const isoWeek = () => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7); const w1 = new Date(d.getFullYear(), 0, 4); return d.getFullYear() + '-W' + (1 + Math.round(((d - w1) / 864e5 - 3 + (w1.getDay() + 6) % 7) / 7)); };
+const packState = t => { const pk = t.packs || {}; return { freeOk: pk.free !== today(), goldLeft: 2 - (pk.week === isoWeek() ? pk.gold || 0 : 0), crackUsed: pk.crack === D.Sx }; };
+function rollPack(kind, used) {
+  const t = D.my, st = packState(t), pool = E.freeAgents(D.owned).filter(id => !used.has(id)).map(id => ({ id, o: ovrOf(id), a: E.age(E.player(id), D.Sx) }));
+  const player = (f, tag) => { const c = pool.filter(x => !used.has(x.id) && f(x)); if (!c.length) return { k: 'dinero', v: 3 }; const x = c[Math.floor(rnd() * c.length)]; used.add(x.id); return { k: 'jugador', pid: x.id, o: x.o, tag }; };
+  const cash = (a, b) => ({ k: 'dinero', v: E.r1(a + rnd() * (b - a)) });
+  const item = () => ({ k: 'bono', it: wpick([['forma', 40], ['cura', 30], ['entreno', 30]]) });
+  const out = [];
+  if (kind === 'bronce') out.push(wpick([[() => player(x => x.o >= 65 && x.o <= 74), 40], [() => cash(1, 3), 35], [() => ({ k: 'tokens', v: 1 }), 25]])());
+  if (kind === 'plata') for (let i = 0; i < 2; i++) out.push(wpick([[() => player(x => x.o >= 75 && x.o <= 82), 35], [() => player(x => x.a <= 21 && x.o >= 66, 'promesa'), 15], [() => cash(3, 6), 25], [() => ({ k: 'tokens', v: 2 }), 10], [item, 15]])());
+  if (kind === 'oro') {
+    out.push(!st.crackUsed && rnd() < .05 ? player(x => x.o >= 86, 'crack') : player(x => x.o >= 80 && x.o <= 85));
+    for (let i = 0; i < 2; i++) out.push(wpick([[() => player(x => x.o >= 76 && x.o <= 84), 30], [() => cash(6, 12), 30], [() => ({ k: 'tokens', v: 3 + Math.floor(rnd() * 2) }), 15], [item, 25]])());
+  }
+  return out;
+}
+async function openPack(kind, pay) {
+  const t = D.my, P = PACKS[kind], st = packState(t); if (!t || S.opening) return;
+  if (kind === 'bronce' && !st.freeOk) return toast('Ya has abierto tu sobre gratis de hoy');
+  if (kind === 'oro' && st.goldLeft <= 0) return toast('Ya has abierto 2 sobres de oro esta semana');
+  if (pay === 'tok' && D.tok(D.myIdx) < P.cost.tok) return toast('No tienes tokens suficientes');
+  if (pay === 'cash' && D.fin(D.myIdx).cash < P.cost.cash) return toast('No tienes dinero suficiente');
+  S.opening = true;
+  try {
+    const prizes = rollPack(kind, new Set()); let squad = [...t.squad], led = t.ledger || [], tok = t.tok || [], items = { ...(t.items || {}) };
+    const pk = { ...(t.packs || {}) }; if (kind === 'bronce') pk.free = today(); if (kind === 'oro') { pk.gold = (pk.week === isoWeek() ? pk.gold || 0 : 0) + 1; pk.week = isoWeek(); }
+    if (pay === 'tok') tok = [...tok, { n: -P.cost.tok, why: P.name, d: Date.now() }].slice(-200);
+    if (pay === 'cash') led = ledgerAdd({ ledger: led }, -P.cost.cash, P.name);
+    for (const x of prizes) {
+      if (x.k === 'jugador') { if (x.tag === 'crack') pk.crack = D.Sx; if (squad.length >= SQ_MAX) { x.sold = E.r1(E.pval(x.pid, D.Sx, 0) * .8); led = ledgerAdd({ ledger: led }, x.sold, 'Sobre (plantilla llena): ' + E.player(x.pid).name); } else { squad.push(x.pid); led = ledgerAdd({ ledger: led }, 0, 'Sobre: ' + E.player(x.pid).name); } }
+      if (x.k === 'dinero') led = ledgerAdd({ ledger: led }, x.v, P.name + ': premio');
+      if (x.k === 'tokens') tok = [...tok, { n: x.v, why: P.name, d: Date.now() }].slice(-200);
+      if (x.k === 'bono') items[x.it] = (items[x.it] || 0) + 1;
+    }
+    await saveTeam(t.id, { squad, ledger: led, tok, items, packs: pk });
+    const ref = S.db.collection('sobres').doc(); ref.set({ t: Date.now(), team: t.id, tipo: kind, premios: prizes }).catch(() => {});
+    S.modal = { type: 'pack', kind, prizes, t0: Date.now() }; render();
+  } finally { S.opening = false; }
+}
+// arte de los sobres (lo usa también el bot para el anuncio)
+const zig = (n, h) => { const pts = []; for (let i = 0; i <= n; i++) pts.push(`${(i / n * 100).toFixed(2)}% ${i % 2 ? h : 0}px`); for (let i = n; i >= 0; i--) pts.push(`${(i / n * 100).toFixed(2)}% calc(100% - ${i % 2 ? h : 0}px)`); return `polygon(${pts.join(',')})`; };
+const PACK_CLIP = zig(22, 7);
+function packArt(kind, big) {
+  const P = PACKS[kind];
+  return `<div class="pack pack-${kind}${big ? ' big' : ''}" style="clip-path:${PACK_CLIP}"><div class="pack-in">
+    <span class="pack-top">LIGA DE AMIGOS</span>
+    <svg class="pack-crest" viewBox="0 0 64 72" aria-hidden="true"><path d="M32 2L60 11V36C60 54 47 65 32 70C17 65 4 54 4 36V11Z" fill="rgba(0,0,0,.18)" stroke="rgba(255,255,255,.7)" stroke-width="2"/><circle cx="32" cy="35" r="13" fill="none" stroke="rgba(255,255,255,.85)" stroke-width="2.5"/><path d="M32 26l6 4.5-2.3 7h-7.4L26 30.5z" fill="rgba(255,255,255,.85)"/></svg>
+    <b class="pack-name">${P.name.replace('Sobre ', '')}</b><span class="pack-n">${P.n} ${P.n > 1 ? 'premios' : 'premio'}</span></div></div>`;
+}
+const rarity = o => o >= 86 ? 'crack' : o >= 80 ? 'oro' : o >= 75 ? 'plata' : 'bronce';
+function prizeCard(x) {
+  if (x.k === 'jugador') { const p = E.player(x.pid); return `<div class="pz pz-${rarity(x.o)}"><span class="pz-o">${x.o}</span><span class="pz-pos">${esc(p.pos)}</span>${shirt('#1b2a4a', '#fff', '', 54)}<b>${esc(p.name)}</b><small>${E.age(p, D.Sx)} años${x.tag === 'crack' ? ' · ¡CRACK!' : x.tag === 'promesa' ? ' · promesa' : ''}</small>${x.sold ? `<small class="pz-sold">Plantilla llena: vendido por ${money(x.sold)}</small>` : ''}</div>`; }
+  if (x.k === 'dinero') return `<div class="pz pz-cash"><span class="pz-big">${money(x.v)}</span><b>Dinero</b><small>Para fichajes y obras</small></div>`;
+  if (x.k === 'tokens') return `<div class="pz pz-tok"><span class="pz-big">+${x.v}</span><b>${x.v > 1 ? 'Tokens' : 'Token'}</b><small>Para pujar, curar o entrenar</small></div>`;
+  return `<div class="pz pz-item"><span class="pz-big">🎟️</span><b>${esc(ITEM_N[x.it])}</b><small>Se usa gratis en lugar de tokens</small></div>`;
+}
+function packModal(m) {
+  const el = (Date.now() - m.t0) / 1000, d = v => `${(v - el).toFixed(2)}s`;
+  return `<div class="pack-open"><div class="pack-stage" style="animation-delay:${d(0)}">${packArt(m.kind, true)}</div>
+    <div class="pz-row">${m.prizes.map((x, i) => `<div class="pz-flip" style="animation-delay:${d(1.6 + i * .75)}"><div class="pz-inner" style="animation-delay:${d(1.6 + i * .75)}"><div class="pz-back">${packArt(m.kind)}</div><div class="pz-front">${prizeCard(x)}</div></div></div>`).join('')}</div>
+    <button class="btn y pack-ok" data-act="close" style="animation-delay:${d(1.9 + m.prizes.length * .75)}">¡Genial!</button></div>`;
+}
+function packsView() {
+  const t = D.my, st = packState(t), it = t.items || {};
+  const card = k => { const P = PACKS[k]; let btns = '';
+    if (k === 'bronce') btns = `<button class="btn y" data-act="pack" data-arg="bronce:free" ${st.freeOk ? '' : 'disabled'}>${st.freeOk ? 'Abrir gratis' : 'Mañana otro'}</button>`;
+    if (k === 'plata') btns = `<button class="btn y" data-act="pack" data-arg="plata:tok">Abrir · 3 ${IC.gem}</button>`;
+    if (k === 'oro') btns = st.goldLeft > 0 ? `<button class="btn y" data-act="pack" data-arg="oro:tok">8 ${IC.gem}</button><button class="btn" data-act="pack" data-arg="oro:cash">${money(15)}</button>` : '<button class="btn" disabled>Vuelve la semana que viene</button>';
+    return `<div class="pack-card">${packArt(k)}<div class="pack-info"><b>${P.name}</b><small class="mute">${P.note}${k === 'oro' ? ` · te quedan ${Math.max(0, st.goldLeft)}` : ''}</small><div class="pack-btns">${btns}</div></div></div>`; };
+  const items = Object.entries(it).filter(([, n]) => n > 0);
+  return `<section class="panel"><div class="ph"><h3>Sobres</h3><small class="mute">${D.tok(D.myIdx)} ${IC.gem} · ${money(D.fin(D.myIdx).cash)}</small></div>
+    <div class="packs">${['bronce', 'plata', 'oro'].map(card).join('')}</div>
+    ${items.length ? `<p class="small" style="margin-top:12px">Tus bonos: ${items.map(([k, n]) => `<b>${ITEM_N[k]} ×${n}</b>`).join(' · ')}. Se usan solos en lugar de tokens.</p>` : ''}
+    <details class="odds"><summary>Ver probabilidades</summary>${['bronce', 'plata', 'oro'].map(k => `<b>${PACKS[k].name}</b><ul>${PACK_ODDS[k].map(([l, p]) => `<li><span>${l}</span><span>${p}%</span></li>`).join('')}</ul>`).join('')}
+    <p class="small mute">Solo salen jugadores libres, nunca los de otro equipo. Con la plantilla llena (${SQ_MAX}), el jugador se vende solo al 80% de su valor. Los sobres se pagan con tokens o dinero del juego, nunca con dinero real.</p></details></section>`;
+}
+
 /* fin de temporada: un día de descanso y la siguiente arranca sola */
 async function seasonRoll() {
   if (!D || !D.done || !S.canWrite || S.cfg.season !== D.Sx) return false;
@@ -606,7 +698,7 @@ function render() {
 function header() {
   const my = D?.my, cash = my ? D.fin(D.myIdx).cash : null;
   const title = my ? `<span>${crest(my, 38)}</span><span><b>${esc(my.name)}</b><small>${esc(S.cfg.name)} · T${D.Sx} · J${Math.min(D.revealed.length + (D.live.length ? 1 : 0), D.total)}/${D.total}</small></span>` : `<span><b>${esc(S.cfg?.name || 'Liga de Amigos')}</b><small>${D ? 'Temporada ' + D.Sx + ' · ' + D.n + ' equipos' : 'Fútbol manager entre amigos'}</small></span>`;
-  const nAuc = newAuctions(), tabs = D ? `<nav class="tabs">${[['inicio', 'Inicio'], ['equipo', 'Equipo'], ['liga', 'Liga'], ['mercado', 'Mercado'], ['club', 'Club']].map(([k, l]) => `<button data-act="view" data-arg="${k}" aria-current="${S.view === k}">${NAV[k]}${l}${k === 'mercado' && nAuc ? `<span class="nbadge" aria-label="${nAuc} subastas nuevas">${nAuc}</span>` : ''}</button>`).join('')}</nav>` : '';
+  const nAuc = newAuctions() + (D && D.my && packState(D.my).freeOk ? 1 : 0), tabs = D ? `<nav class="tabs">${[['inicio', 'Inicio'], ['equipo', 'Equipo'], ['liga', 'Liga'], ['mercado', 'Mercado'], ['club', 'Club']].map(([k, l]) => `<button data-act="view" data-arg="${k}" aria-current="${S.view === k}">${NAV[k]}${l}${k === 'mercado' && nAuc ? `<span class="nbadge" aria-label="${nAuc} subastas nuevas">${nAuc}</span>` : ''}</button>`).join('')}</nav>` : '';
   return `<header class="top"><div class="row"><div class="club">${title}</div>${cash != null ? `<button class="tokchip" data-act="go" data-arg="club:tok" aria-label="Tokens: ${D.tok(D.myIdx)}">${IC.gem}${D.tok(D.myIdx)}</button><div class="cash ${cash < 0 ? 'neg' : ''}" aria-label="Caja">${IC.coin}${money(cash)}</div>` : ''}</div>${tabs}</header>`;
 }
 function body() {
@@ -833,7 +925,7 @@ function trainView() {
   const ids = t.squad.slice().sort((a, b) => ovrOf(b, t) - ovrOf(a, t));
   return `<div class="grid"><section class="panel"><h3>Sesión de hoy</h3><ul class="facts"><li>1 sesión al día</li><li>Los jóvenes suben más rápido</li><li>100 exp = +1 de media</li></ul>
   <div class="focus" style="margin:12px 0">${Object.entries(FOCUS).map(([k, [l, d]]) => `<button data-act="focus" data-arg="${k}" aria-pressed="${f === k}" ${done ? 'disabled' : ''}>${l}<small>${d}</small></button>`).join('')}</div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn y" data-act="train" ${done ? 'disabled' : ''}>${done ? 'Entrenado hoy' : 'Entrenar ahora'}</button>${done && t.lastTrain2 !== today() ? '<button class="btn" data-act="train2">Sesión extra · 2 tokens</button>' : ''}</div><p class="small mute" style="margin-top:8px">La ciudad deportiva (nivel ${E.facLvl(t, 'ent')}) da un ${E.facLvl(t, 'ent') * 15}% más de experiencia.</p></section>
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn y" data-act="train" ${done ? 'disabled' : ''}>${done ? 'Entrenado hoy' : 'Entrenar ahora'}</button>${done && t.lastTrain2 !== today() ? `<button class="btn" data-act="train2">Sesión extra · ${D.my.items?.entreno > 0 ? 'bono' : '2 tokens'}</button>` : ''}</div><p class="small mute" style="margin-top:8px">La ciudad deportiva (nivel ${E.facLvl(t, 'ent')}) da un ${E.facLvl(t, 'ent') * 15}% más de experiencia.</p></section>
   <section class="panel"><h3>Progreso</h3><div class="rows" style="margin-top:6px">${ids.map(id => { const p = E.player(id), xp = t.xp?.[id] || 0, o = ovrOf(id, t), cap = Math.max(p.base, Math.floor(E.pot(p))), atMax = p.base + Math.floor(xp / 100) >= cap; return `<div class="prow" style="cursor:default"><span class="pos ${lineOf(p.pos)}">${p.pos}</span><span class="pname">${esc(p.name)}<small>${atMax ? 'En su techo' : (xp % 100) + '/100 exp.'}${gains && gains[id] ? ' · <b style="color:var(--good)">+' + gains[id] + '</b>' : ''}</small></span><span class="xp"><i style="width:${atMax ? 100 : xp % 100}%"></i></span><span class="ovr">${o}</span></div>`; }).join('')}</div></section></div>`;
 }
 async function doTrain() {
@@ -897,9 +989,11 @@ function canAfford(price) { return D.fin(D.myIdx).cash >= price; }
 function marketView() {
   if (!D.my) return pickTeamView();
   if (S.msub === 'subastas') { try { localStorage.setItem('aucSeen', Date.now()); } catch (e) {} }
-  const subs = [['subastas', 'Subastas'], ['libres', 'Libres'], ['equipos', 'Rivales'], ['ofertas', 'Ofertas']];
+  const subs = [['subastas', 'Subastas'], ['sobres', 'Sobres' + (packState(D.my).freeOk ? ' •' : '')], ['libres', 'Libres'], ['equipos', 'Rivales'], ['ofertas', 'Ofertas']];
   let html = `<div class="sub">${subs.map(([k, l]) => `<button data-act="msub" data-arg="${k}" aria-pressed="${S.msub === k}">${l}</button>`).join('')}</div>`;
-  if (S.msub === 'subastas') {
+  if (S.msub === 'sobres') {
+    html += packsView();
+  } else if (S.msub === 'subastas') {
     html += auctionsView();
   } else if (S.msub === 'equipos') {
     const others = D.teams.filter(t => t.id !== D.my.id), t = others.find(x => x.id === S.otherTeam) || others[0];
@@ -1034,6 +1128,7 @@ function modal() {
   const m = S.modal; document.body.dataset.tutonav = m && m.type === 'tuto' ? (tutoSteps()[m.i].nav || '') : ''; if (!m) return '';
   if (m.type === 'tuto') return tutoHTML(m.i);
   let inner = '';
+  if (m.type === 'pack') return `<div class="ov pack-ov"><div class="pack-sheet" role="dialog" aria-modal="true" aria-label="Abriendo ${PACKS[m.kind].name}">${packModal(m)}</div></div>`;
   if (m.type === 'player') inner = playerModal(m.id);
   if (m.type === 'auction') { const p = E.player(m.id), v = E.pval(m.id, D.Sx, D.my.xp?.[m.id] || 0); let dv = 720; try { dv = +localStorage.getItem('auc-dur') || 720; } catch (e) {}
     inner = `<h2>Subastar a ${esc(p.name)}</h2><p class="mute">Precio de salida: <b>${money(E.r1(v * .6))}</b> (60% de su valor). Pujan tus amigos y los equipos de la IA que necesiten un ${esc(p.pos)}. Se lo lleva la puja más alta.</p>
@@ -1059,7 +1154,7 @@ function playerModal(id) {
   let acts = '';
   if (D.my && !own) acts = `<button class="btn y" data-act="buyfree" data-arg="${id}" ${canAfford(v) && D.my.squad.length < SQ_MAX ? '' : 'disabled'}>Fichar por ${money(v)}</button>`;
   else if (D.my && own && !mine) acts = own.owner ? `<button class="btn y" data-act="offer" data-arg="${id}">Hacer oferta</button>` : `<button class="btn y" data-act="buyai" data-arg="${id}" ${canAfford(E.r1(v * 1.35)) && D.my.squad.length < SQ_MAX && own.squad.length > 17 ? '' : 'disabled'}>Comprar por ${money(E.r1(v * 1.35))}</button>${own.squad.length <= 17 ? '<p class="small mute">La IA no vende: se quedaría corta de plantilla.</p>' : ''}`;
-  else if (mine) acts = `${ss && ss.why === 'Lesión' ? `<button class="btn y" data-act="heal" data-arg="${id}">Curar · 4 tokens</button>` : ''}${!ss && cond(id) < 100 ? `<button class="btn y" data-act="boost" data-arg="${id}">Forma al 100% · 2 tokens</button>` : ''}<button class="btn" data-act="auction" data-arg="${id}" ${D.my.squad.length > SQ_MIN ? '' : 'disabled'}>Subastar 30 min</button><button class="btn ghost" data-act="release" data-arg="${id}" ${D.my.squad.length > SQ_MIN ? '' : 'disabled'}>Liberar y cobrar ${money(E.r1(v * .5))}</button>`;
+  else if (mine) acts = `${ss && ss.why === 'Lesión' ? `<button class="btn y" data-act="heal" data-arg="${id}">Curar · ${D.my.items?.cura > 0 ? 'bono' : '4 tokens'}</button>` : ''}${!ss && cond(id) < 100 ? `<button class="btn y" data-act="boost" data-arg="${id}">Forma al 100% · ${D.my.items?.forma > 0 ? 'bono' : '2 tokens'}</button>` : ''}<button class="btn" data-act="auction" data-arg="${id}" ${D.my.squad.length > SQ_MIN ? '' : 'disabled'}>Subastar 30 min</button><button class="btn ghost" data-act="release" data-arg="${id}" ${D.my.squad.length > SQ_MIN ? '' : 'disabled'}>Liberar y cobrar ${money(E.r1(v * .5))}</button>`;
   const cols = own ? own.colors : ['#5b6b94', '#ffffff'];
   return `<div class="pcard">${shirt(p.pos === 'POR' && own ? '#facc15' : cols[0], p.pos === 'POR' && own ? '#111111' : cols[1], '', 70)}<div style="flex:1"><h2>${esc(p.name)}</h2><div class="mute"><span class="pos ${lineOf(p.pos)}">${p.pos}</span> ${p.nat} · ${a} años · ${own ? esc(own.name) : 'Sin equipo'}</div><div style="margin-top:4px">${stars(o)}</div></div><span class="ovr">${o}</span></div>
   ${ss ? `<p class="note bad">${ss.why}: ${ss.n} jornada${ss.n > 1 ? 's' : ''} más.</p>` : ''}
@@ -1191,6 +1286,7 @@ const ACT = {
     openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...lo, speed: 4, manage, summary: endSummary('league', doc) });
   },
   friendly: () => { S.modal = { type: 'friendly' }; render(); },
+  pack: a => { const [k, pay] = a.split(':'); openPack(k, pay); },
   noticia: id => { S.modal = { type: 'noticia', id }; render(); },
   playfriendly: () => { const rival = +$('#f-rival').value, view = $('#f-view').value, sp = $('#f-speed').value; const fr = E.simulateFriendly(S.cfg, D.teams, D.myIdx, rival, D.Sx, D.cur, Date.now() + ':' + Math.random()), ords = []; const m = fr.m; try { localStorage.setItem('mv-view', view); } catch (e) {} S.modal = null; render(); const manage = { side: 0, bench: fr.pre.side[0].bench, onOrder: o => { ords.push({ ...o, s: 0, t: Date.now() }); VW && VW.update(E.resultFromPre(fr.pre, ords)); toast(o.k === 'sub' ? 'Cambio hecho' : 'Táctica cambiada'); } }; openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), live: null, view, speed: sp === 'h' ? 4 : +sp, highlights: sp === 'h', summary: endSummary('friendly'), manage }); },
   close: () => { S.modal = null; S.rp = null; render(); },
@@ -1224,9 +1320,9 @@ const ACT = {
   build: k => { const t = D.my, l = (t.fac || {})[k] || 0, F = E.FAC[k], cost = F.cost[l]; ask(F.n + ' nivel ' + (l + 1), `Cuesta ${money(cost)} y tarda ${12 * (l + 1)} horas. ${F.d}`, 'Construir', () => saveTeam(t.id, { fac: { ...(t.fac || {}), [k]: l + 1 }, build: { k, lvl: l + 1, done: Date.now() + (l + 1) * 43200000 }, ledger: ledgerAdd(t, -cost, 'Obras: ' + F.n + ' ' + (l + 1)) })); },
   finishbuild: () => { const t = D.my, b = t.build; if (!b) return; const n = Math.ceil((b.done - Date.now()) / 43200000) * 2; spendTok(n, 'Terminar obras', { build: { ...b, done: Date.now() - 1 } }); },
   daily: () => { const t = D.my, d = t.daily || {}; if (d.d === today()) return; const streak = d.d === yesterday() ? (d.streak || 0) + 1 : 1, n = Math.min(5, streak); saveTeam(t.id, { daily: { d: today(), streak }, tok: tokAdd(t, n, 'Premio diario') }).then(() => toast('+' + n + ' tokens')); },
-  boost: id => spendTok(2, 'Forma: ' + E.player(id).name, { boost: { ...(D.my.boost || {}), [id]: D.Sx + ':' + D.nextMd } }).then(x => x !== null && toast(E.player(id).name + ' llegará al 100% al próximo partido')),
-  heal: id => spendTok(4, 'Curación: ' + E.player(id).name, { heal: { ...(D.my.heal || {}), [id]: D.Sx + ':' + D.nextMd } }).then(x => x !== null && toast(E.player(id).name + ' estará disponible')),
-  train2: () => { if (D.my.lastTrain2 === today()) return; spendTok(2, 'Entrenamiento extra', { lastTrain2: today(), lastTrain: '' }); },
+  boost: id => (D.my.items?.forma > 0 ? saveTeam(D.my.id, { boost: { ...(D.my.boost || {}), [id]: D.Sx + ':' + D.nextMd }, items: { ...D.my.items, forma: D.my.items.forma - 1 } }) : spendTok(2, 'Forma: ' + E.player(id).name, { boost: { ...(D.my.boost || {}), [id]: D.Sx + ':' + D.nextMd } })).then(x => x !== null && toast(E.player(id).name + ' llegará al 100% al próximo partido')),
+  heal: id => (D.my.items?.cura > 0 ? saveTeam(D.my.id, { heal: { ...(D.my.heal || {}), [id]: D.Sx + ':' + D.nextMd }, items: { ...D.my.items, cura: D.my.items.cura - 1 } }) : spendTok(4, 'Curación: ' + E.player(id).name, { heal: { ...(D.my.heal || {}), [id]: D.Sx + ':' + D.nextMd } })).then(x => x !== null && toast(E.player(id).name + ' estará disponible')),
+  train2: () => { if (D.my.lastTrain2 === today()) return; if (D.my.items?.entreno > 0) return saveTeam(D.my.id, { lastTrain2: today(), lastTrain: '', items: { ...D.my.items, entreno: D.my.items.entreno - 1 } }); spendTok(2, 'Entrenamiento extra', { lastTrain2: today(), lastTrain: '' }); },
   color: i => { S.pickColor = +i; document.querySelectorAll('.colors button').forEach((b, k) => b.setAttribute('aria-pressed', k === +i)); },
   saveclub: async () => { const t = D.my, name = $('#c-name').value.trim().slice(0, 24) || t.name, short = ($('#c-short').value.trim().slice(0, 3) || t.short).toUpperCase(); const colors = S.pickColor != null ? COLORS[S.pickColor] : t.colors; await saveTeam(t.id, { name, short, colors }); toast('Club guardado'); },
   leave: () => ask('Dejar el equipo', 'La IA pasará a llevarlo. Podrás coger otro equipo libre.', 'Dejar', () => saveTeam(D.my.id, { owner: null, lineup: null }), true),

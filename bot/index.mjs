@@ -102,6 +102,7 @@ function watch(code) {
   col('equipos', q => { q.docs.forEach(d => { lg.teams[d.id] = dec(d.data()); }); ledgerNews(lg); });
   col('sorteos', q => q.docs.forEach(d => { lg.sorteos[d.id] = dec(d.data()); }));
   col('subastas', q => { q.docs.forEach(d => { lg.auc[d.id] = dec(d.data()); }); q.docChanges().forEach(ch => aucNews(lg, ch.type, ch.doc.id, dec(ch.doc.data()))); });
+  col('sobres', q => q.docChanges().forEach(ch => { if (ch.type === 'added') packNews(lg, ch.doc.id, dec(ch.doc.data())); }));
   col('miembros', q => q.docs.forEach(d => { lg.mem[d.id] = d.data(); }));
   const store = (k, name) => col(name, q => {
     q.docs.forEach(d => { lg[k][d.id] = dec(d.data()); });
@@ -553,6 +554,29 @@ function aucNews(lg, type, id, a) {
   }
 }
 
+
+/* ---------- sobres ---------- */
+const PACK_N = { bronce: 'Sobre Bronce', plata: 'Sobre Plata', oro: 'Sobre Oro' };
+function packNews(lg, id, x) {
+  const chat = chatOf(lg.code); if (!chat || !x || !x.t || x.t < lg.boot - 60000 || !lg.cfg) return;
+  const t = lg.teams[x.team]; if (!t) return;
+  const ps = (x.premios || []).filter(p => p.k === 'jugador'), best = ps.sort((a, b) => b.o - a.o)[0];
+  if (!(x.tipo === 'oro' || (best && best.o >= 84))) return;
+  once(lg.code + ':pack:' + id, () => {
+    const desc = (x.premios || []).map(p => p.k === 'jugador' ? `${p.tag === 'crack' ? '💎' : '⭐'} <b>${esc(E.player(p.pid).name)}</b> (${p.o})` : p.k === 'dinero' ? `💰 ${fmtM(p.v)}` : p.k === 'tokens' ? `💎 ${p.v} tokens` : '🎟️ bono').join(' · ');
+    const crack = ps.find(p => p.tag === 'crack');
+    send(chat, `${crack ? '🚨💎 ¡¡CRACK EN UN SOBRE!!' : '🎁'} ${who(lg, t.idx)} abre un <b>${PACK_N[x.tipo] || 'sobre'}</b>: ${desc}`);
+    if (crack && !crack.sold) queueNews(chat, () => NEWS.fichaje(lg, t.idx, E.player(crack.pid).name, E.pval(crack.pid, lg.cfg.season, 0), 'Sobre de oro'), 20000);
+  });
+}
+function announcePacks(code) {
+  const lg = L[code], chat = chatOf(code); if (!chat) return;
+  once(code + ':ann:sobres', () => {
+    send(chat, `🎁 <b>NOVEDAD: LLEGAN LOS SOBRES</b>\n\nYa podéis abrir sobres en el juego: <b>Mercado → Sobres</b>.\n\n🥉 <b>Bronce</b> · GRATIS cada día · 1 premio\n🥈 <b>Plata</b> · 3 tokens · 2 premios\n🥇 <b>Oro</b> · 8 tokens o 15 M€ · 3 premios (máx. 2 por semana)\n\nPueden salir:\n• Jugadores, desde suplentes hasta <b>cracks de 86+</b> (5% en el de oro, uno por temporada)\n• Promesas jóvenes\n• Dinero y tokens\n• Bonos: forma al 100%, curar una lesión o entreno extra, gratis\n\nSolo salen agentes libres, nunca jugadores de otro equipo, y las probabilidades están en el juego. Se pagan con tokens o dinero del juego, nunca con dinero real.\n\nY ojo: si alguien saca algo gordo, me entero y lo cuento aquí 😏\n${SITE}`);
+    queueNews(chat, async () => ({ kind: 'sobres', caption: '🎁 Novedad: llegan los sobres', data: {} }), 5000);
+  });
+}
+
 /* ---------- comandos ---------- */
 async function link(chat, raw) {
   const code = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
@@ -595,6 +619,7 @@ await login();
 if (ST.groq) setAIKey(ST.groq);
 await tg('setMyCommands', { commands: [{ command: 'vincular', description: 'Vincular este chat a una liga (código de 6 letras)' }, { command: 'proximos', description: 'Próximos partidos' }, { command: 'tabla', description: 'Clasificación' }, { command: 'pique', description: 'Que el bot pique al grupo' }, { command: 'noticias', description: 'Noticias de la liga' }, { command: 'noticia', description: 'Una noticia en imagen de la prensa de la liga' }, { command: 'desvincular', description: 'Dejar de recibir avisos aquí' }] });
 for (const code in ST.leagues) watch(code);
+setTimeout(() => { for (const code in ST.leagues) announcePacks(code); }, 30000);
 setInterval(tick, 30000); setTimeout(tick, 5000);
 poll();
 console.log('Bot en marcha');
