@@ -40,3 +40,6 @@ Juego de gestión de fútbol estilo Top Eleven para jugar una liga con tus amigo
 Avisa 10 min antes de cada partido, publica resultados con goleadores y clasificación, ofertas y el muro.
 En el VPS: `cd /var/www/liga && git pull && bash deploy/bot.sh` (la primera vez pide el token de BotFather y lo guarda en /etc/liga-bot.env).
 En Telegram: añade el bot a vuestro grupo y escribe `/vincular CODIGO`.
+
+## Actualización automática
+El VPS baja los cambios de GitHub cada minuto (deploy/auto.sh) y deja el estado en /estado.json.
