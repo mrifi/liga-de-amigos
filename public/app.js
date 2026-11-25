@@ -197,7 +197,7 @@ async function finalize() {
 async function tick() {
   if (S.busy || !S.db || !S.canWrite || !D) return;
   if (needFin(Date.now())) { S.busy = true; try { await finalize(); } catch (e) { console.warn('fin', e); } finally { S.busy = false; } setTimeout(tick, 300); return; }
-  if (!S.busy) { S.busy = true; let did = false; try { did = (await settleAuctions()) || (await cupTick()) || (await clTick()) || (await seasonRoll()); ensureDailyAuctions().catch(() => {}); ensureAiOffers().catch(() => {}); } catch (e) { console.warn('extra', e); } finally { S.busy = false; } if (did) { setTimeout(tick, 300); return; } }
+  if (!S.busy) { S.busy = true; let did = false; try { did = (await settleAuctions()) || (await cupTick()) || (await clTick()) || (await seasonRoll()); ensureDailyAuctions().catch(() => {}); ensureSpecialAuctions().catch(() => {}); ensureAiOffers().catch(() => {}); } catch (e) { console.warn('extra', e); } finally { S.busy = false; } if (did) { setTimeout(tick, 300); return; } }
   if (D.done) return;
   const md = D.nextMd; if (md > D.total || kickAt(md) > Date.now()) return;
   S.busy = true;
@@ -313,8 +313,9 @@ async function bid(id) {
   const a0 = S.auctions[id], t = D.my; if (!a0 || !t) return;
   if (a0.seller === t.id) return toast('No puedes pujar por tu propio jugador');
   if (topBid(a0)?.team === t.id) return toast('Ya vas ganando esta subasta');
-  const amt = nextBid(a0);
-  if (D.tok(D.myIdx) < 1) return toast('Pujar cuesta 1 token');
+  const amt = nextBid(a0), cost = bidCost(a0);
+  if (espFull(t, a0.pid)) return toast(`Ya tienes el máximo de ${ESP_N[espOf(a0.pid)].toLowerCase()}s (${ESP_MAX[espOf(a0.pid)]})`);
+  if (D.tok(D.myIdx) < cost) return toast(`Pujar cuesta ${cost} token${cost > 1 ? 's' : ''}`);
   if (!canAfford(amt)) return toast('No te llega el dinero');
   if (t.squad.length >= SQ_MAX) return toast('Tu plantilla está llena');
   const ref = S.db.doc('subastas/' + id); const l = await ref.acquire({ holder: S.me, ttlMs: 8000 }); if (!l.acquired) return toast('Otra puja entrando, prueba otra vez');
@@ -323,7 +324,7 @@ async function bid(id) {
   const amt2 = nextBid(a); if (!canAfford(amt2)) return toast('No te llega el dinero');
   const ends = a.ends - Date.now() < 60000 ? Date.now() + 60000 : a.ends;
   await write('subastas/' + id, () => ref.set({ ...a, bids: [...(a.bids || []), { team: t.id, amt: amt2, t: Date.now() }], ends }));
-  await saveTeam(t.id, { tok: tokAdd(t, -1, 'Puja: ' + E.player(a.pid).name) });
+  await saveTeam(t.id, { tok: tokAdd(t, -cost, 'Puja: ' + E.player(a.pid).name) });
   toast('Pujas ' + money(amt2) + ' por ' + E.player(a.pid).name);
 }
 /* ---------- temporada: objetivos de la directiva, vitrina, muro y ofertas de la IA ---------- */
@@ -421,7 +422,7 @@ async function ensureAiOffers() {
     // un club de la IA con dinero va a por el mejor jugador tuyo que pueda pagar (entre tus 8 mejores)
     const buyers = D.teams.filter(x => !x.owner && x.squad.length < SQ_MAX).map(x => ({ x, cash: D.fin(x.idx).cash })).sort((a, b) => b.cash - a.cash).slice(0, 3); if (!buyers.length) continue;
     const { x: buyer, cash } = buyers[Math.floor(r() * buyers.length)], mult = 1.15 + r() * .35;
-    const cand = t.squad.map(pid => ({ pid, o: ovrOf(pid, t), price: E.r1(E.pval(pid, D.Sx, t.xp?.[pid] || 0) * mult) })).sort((a, b) => b.o - a.o).slice(0, 8).filter(c => c.price <= cash * .8);
+    const cand = t.squad.filter(pid => !espOf(pid)).map(pid => ({ pid, o: ovrOf(pid, t), price: E.r1(E.pval(pid, D.Sx, t.xp?.[pid] || 0) * mult) })).sort((a, b) => b.o - a.o).slice(0, 8).filter(c => c.price <= cash * .8);
     if (!cand.length) continue;
     const { pid, price } = cand[0];
     await S.db.doc('ofertas/' + id).set({ id, from: buyer.id, to: t.id, pid, price, status: 'pend', t: Date.now(), ai: true, exp: Date.now() + DAY });
@@ -544,7 +545,7 @@ function upcomingHTML() {
 }
 /* la IA también puja en las subastas: interés según lo que necesita y su caja */
 function aiBids(a) {
-  if (!D) return [];
+  if (!D || espOf(a.pid)) return []; // la IA no puja por leyendas ni héroes
   const p = E.player(a.pid), o = ovrOf(a.pid, null), out = [];
   D.teams.forEach((t, i) => {
     if (t.owner || a.seller === t.id || t.squad.length >= SQ_MAX) return;
@@ -569,7 +570,7 @@ const PACKS = {
 const PACK_ODDS = {
   bronce: [['Jugador de 65-74', 40], ['1-3 M€', 35], ['1 token', 25]],
   plata: [['Jugador de 75-82', 35], ['Promesa joven (≤21)', 15], ['3-6 M€', 25], ['2 tokens', 10], ['Bono (forma, cura o entreno)', 15]],
-  oro: [['1º premio: jugador de 80-85', 95], ['1º premio: CRACK de 86+ (1 por temporada)', 5], ['Otros: jugador de 76-84', 30], ['Otros: 6-12 M€', 30], ['Otros: 3-4 tokens', 15], ['Otros: bono', 25]]
+  oro: [['1º premio: jugador de 80-85', 92], ['1º premio: CRACK de 86+ (1 por temporada)', 4.5], ['1º premio: HÉROE (84-89)', 3], ['1º premio: LEYENDA (88-96, 1 por temporada)', .5], ['Otros: jugador de 76-84', 30], ['Otros: 6-12 M€', 30], ['Otros: 3-4 tokens', 15], ['Otros: bono', 25]]
 };
 const ITEM_N = { forma: 'Bono de forma', cura: 'Bono de curación', entreno: 'Entreno extra' };
 const rnd = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] / 4294967296; };
@@ -585,7 +586,10 @@ function rollPack(kind, used) {
   if (kind === 'bronce') out.push(wpick([[() => player(x => x.o >= 65 && x.o <= 74), 40], [() => cash(1, 3), 35], [() => ({ k: 'tokens', v: 1 }), 25]])());
   if (kind === 'plata') for (let i = 0; i < 2; i++) out.push(wpick([[() => player(x => x.o >= 75 && x.o <= 82), 35], [() => player(x => x.a <= 21 && x.o >= 66, 'promesa'), 15], [() => cash(3, 6), 25], [() => ({ k: 'tokens', v: 2 }), 10], [item, 15]])());
   if (kind === 'oro') {
-    out.push(!st.crackUsed && rnd() < .05 ? player(x => x.o >= 86, 'crack') : player(x => x.o >= 80 && x.o <= 85));
+    const rr = rnd(), full = t.squad.length >= SQ_MAX, legOk = !full && (t.packs || {}).leyS !== D.Sx && espCount(t, 'ley') < ESP_MAX.ley, herOk = !full && espCount(t, 'her') < ESP_MAX.her;
+    const espPick = k => { const pool = espFree(k, used); if (!pool.length) return null; const id = pool[Math.floor(rnd() * pool.length)]; used.add(id); return { k: 'jugador', pid: id, o: E.player(id).base, tag: k }; };
+    const sp = rr < .005 && legOk ? espPick('ley') : rr < .035 && herOk ? espPick('her') : null;
+    out.push(sp || (!st.crackUsed && rnd() < .05 ? player(x => x.o >= 86, 'crack') : player(x => x.o >= 80 && x.o <= 85)));
     for (let i = 0; i < 2; i++) out.push(wpick([[() => player(x => x.o >= 76 && x.o <= 84), 30], [() => cash(6, 12), 30], [() => ({ k: 'tokens', v: 3 + Math.floor(rnd() * 2) }), 15], [item, 25]])());
   }
   return out;
@@ -607,7 +611,7 @@ async function openPack(kind, pay) {
     if (pay === 'tok') tok = tokAdd({ tok }, -P.cost.tok, P.name);
     if (pay === 'cash') led = ledgerAdd({ ledger: led }, -P.cost.cash, P.name);
     for (const x of prizes) {
-      if (x.k === 'jugador') { if (x.tag === 'crack') pk.crack = D.Sx; if (squad.length >= SQ_MAX) { x.sold = E.r1(E.pval(x.pid, D.Sx, 0) * .8); led = ledgerAdd({ ledger: led }, x.sold, 'Sobre (plantilla llena): ' + E.player(x.pid).name); } else { squad.push(x.pid); led = ledgerAdd({ ledger: led }, 0, 'Sobre: ' + E.player(x.pid).name); } }
+      if (x.k === 'jugador') { if (x.tag === 'crack') pk.crack = D.Sx; if (x.tag === 'ley') pk.leyS = D.Sx; if (squad.length >= SQ_MAX) { x.sold = E.r1(E.pval(x.pid, D.Sx, 0) * .8); led = ledgerAdd({ ledger: led }, x.sold, 'Sobre (plantilla llena): ' + E.player(x.pid).name); } else { squad.push(x.pid); led = ledgerAdd({ ledger: led }, 0, 'Sobre: ' + E.player(x.pid).name); } }
       if (x.k === 'dinero') led = ledgerAdd({ ledger: led }, x.v, P.name + ': premio');
       if (x.k === 'tokens') tok = tokAdd({ tok }, x.v, P.name);
       if (x.k === 'bono') items[x.it] = (items[x.it] || 0) + 1;
@@ -626,6 +630,7 @@ function packArt(kind, big) {
 }
 const rarity = o => o >= 86 ? 'crack' : o >= 80 ? 'oro' : o >= 75 ? 'plata' : 'bronce';
 function prizeCard(x) {
+  if (x.k === 'jugador' && espOf(x.pid)) return `<div class="pz pz-esp">${espCard(x.pid, 'pzc')}</div>`;
   if (x.k === 'jugador') { const p = E.player(x.pid); return `<div class="pz pz-${rarity(x.o)}"><span class="pz-o">${x.o}</span><span class="pz-pos">${esc(p.pos)}</span>${shirt('#1b2a4a', '#fff', '', 54)}<b>${esc(p.name)}</b><small>${E.age(p, D.Sx)} años${x.tag === 'crack' ? ' · ¡CRACK!' : x.tag === 'promesa' ? ' · promesa' : ''}</small>${x.sold ? `<small class="pz-sold">Plantilla llena: vendido por ${money(x.sold)}</small>` : ''}</div>`; }
   if (x.k === 'dinero') return `<div class="pz pz-cash"><span class="pz-big">${money(x.v)}</span><b>Dinero</b><small>Para fichajes y obras</small></div>`;
   if (x.k === 'tokens') return `<div class="pz pz-tok"><span class="pz-big">+${x.v}</span><b>${x.v > 1 ? 'Tokens' : 'Token'}</b><small>Para pujar, curar o entrenar</small></div>`;
@@ -765,6 +770,82 @@ async function rulSpin(how) {
   } catch (e) { console.warn('ruleta', e); } finally { S.rulBusy = false; }
 }
 
+/* ---------- cartas especiales: Leyendas y Héroes ---------- */
+const ESP_N = { ley: 'Leyenda', her: 'Héroe' }, ESP_MAX = { ley: 2, her: 3 }, ESP_MIN = { ley: 60, her: 30 };
+const espOf = id => E.espOf(id);
+const espCount = (t, k) => (t && t.squad || []).filter(id => espOf(id) === k).length;
+const espFull = (t, id) => { const k = espOf(id); return !!k && espCount(t, k) >= ESP_MAX[k]; };
+const FLAG = window.FLAGS || {};
+const flag = c => FLAG[c] ? `<svg class="flag" viewBox="0 0 30 20" role="img" aria-label="${c}">${FLAG[c]}</svg>` : '';
+const POS_N = { DC: 'Delantero', MCO: 'Mediapunta', EI: 'Extremo izq.', ED: 'Extremo der.', DFC: 'Central', POR: 'Portero', MC: 'Medio', MCD: 'Pivote', LI: 'Lateral izq.', LD: 'Lateral der.' };
+function espCard(id, cls = '', o) {
+  const p = E.player(id), k = p.esp; if (!k) return '';
+  const nl = p.name.length, fs = nl <= 11 ? 10.5 : nl <= 14 ? 8.6 : nl <= 17 ? 7.4 : 6.6;
+  return `<div class="lc lc-${k} ${cls}"><img class="lc-fr" src="img/esp/${k === 'her' ? 'marco-heroe' : 'marco'}.webp" alt="" draggable="false"><img class="lc-fig" src="img/esp/fig-${p.fig}.webp" alt="" draggable="false"><div class="lc-ovr"><b>${o || p.base}</b><span>${p.pos}</span>${flag(p.nat)}</div><div class="lc-bot"><span class="lc-tag">${ESP_N[k].toUpperCase()}</span><b class="lc-name" style="font-size:${fs}cqw">${esc(p.name)}</b><span class="lc-meta">${flag(p.nat)}${p.nat}<i>·</i>${POS_N[p.pos] || p.pos}</span></div><div class="lc-holo"></div></div>`;
+}
+const LAUREL = '<svg class="lau" viewBox="0 0 60 26" aria-hidden="true"><g fill="#ffcf4a" stroke="#8a5a06" stroke-width=".6"><path d="M30 24C20 23 10 17 6 6c6 4 13 9 24 12z"/><path d="M30 24c10-1 20-7 24-18-6 4-13 9-24 12z"/><ellipse cx="11" cy="8" rx="2.4" ry="5" transform="rotate(-35 11 8)"/><ellipse cx="17" cy="13" rx="2.4" ry="5" transform="rotate(-50 17 13)"/><ellipse cx="49" cy="8" rx="2.4" ry="5" transform="rotate(35 49 8)"/><ellipse cx="43" cy="13" rx="2.4" ry="5" transform="rotate(50 43 13)"/></g></svg>';
+const STAR = '<svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1.5l3 7 7.5.6-5.7 4.9 1.8 7.3L12 17.4 5.4 21.3l1.8-7.3L1.5 9.1 9 8.5z" fill="#dbeeff" stroke="#4d8fe6" stroke-width="1"/></svg>';
+const espBadge = id => { const k = espOf(id); return k ? `<span class="espb espb-${k}">${ESP_N[k]}</span>` : ''; };
+const espBusy = () => new Set(Object.values(S.auctions).filter(a => a.status === 'open').map(a => a.pid));
+const espFree = (k, extra) => { const busy = espBusy(); return E.ESP[k].filter(id => !D.owned.has(id) && !busy.has(id) && !(extra && extra.has(id))); };
+/* subastas especiales: un héroe cada 3 días (de 12:00 a 12:00) y una leyenda cada domingo a las 20:00 durante 24 h */
+function espSlots(now = Date.now()) {
+  const out = [], d = new Date(now);
+  const h = new Date(d); h.setHours(12, 0, 0, 0); if (now < h.getTime()) h.setDate(h.getDate() - 1);
+  const hDay = Math.floor((h.getTime() - h.getTimezoneOffset() * 60000) / DAY);
+  if (hDay % 3 === 0) out.push({ k: 'her', id: 'esp-her-' + hDay, start: h.getTime(), end: h.getTime() + DAY });
+  const l = new Date(d); l.setHours(20, 0, 0, 0); l.setDate(l.getDate() - ((l.getDay() + 7) % 7)); if (l.getTime() > now) l.setDate(l.getDate() - 7);
+  const lDay = Math.floor((l.getTime() - l.getTimezoneOffset() * 60000) / DAY);
+  if (now < l.getTime() + DAY) out.push({ k: 'ley', id: 'esp-ley-' + lDay, start: l.getTime(), end: l.getTime() + DAY });
+  return out;
+}
+async function ensureSpecialAuctions(now = Date.now()) {
+  if (!D || !S.canWrite || !S.cfg || !S.cfg.started || D.done) return;
+  for (const sl of espSlots(now)) {
+    if (now < sl.start || now >= sl.end) continue;
+    if (S.auctions[sl.id] || (ensureSpecialAuctions.tried || {})[sl.id]) continue;
+    (ensureSpecialAuctions.tried = ensureSpecialAuctions.tried || {})[sl.id] = 1;
+    const ref = S.db.doc('subastas/' + sl.id), l = await ref.acquire({ holder: S.me || 'x', ttlMs: 10000 }); if (!l.acquired) continue;
+    if ((await ref.get()).data()?.pid) continue;
+    const uref = S.db.doc('especiales/s' + D.Sx), used = new Set(((await uref.get()).data() || {}).used || []);
+    let pool = espFree(sl.k, used); if (!pool.length) pool = espFree(sl.k); if (!pool.length) continue;
+    const r = E.rng(sl.id + S.cfg.seed), pid = pool[Math.floor(r() * pool.length)];
+    await ref.set({ id: sl.id, pid, seller: null, kind: sl.k === 'ley' ? 'leyenda' : 'heroe', min: ESP_MIN[sl.k], ends: sl.end, bids: [], status: 'open', t: Date.now() });
+    await uref.set({ used: [...used, pid] });
+  }
+}
+const bidCost = a => a && a.kind === 'leyenda' ? 2 : 1;
+/* el amigo que va último en la liga puja por leyendas con un 10% de descuento */
+const lastHuman = () => { if (!D || !D.table) return null; const hs = D.table.filter(r => D.teams[r.t] && D.teams[r.t].owner); return hs.length >= 2 ? D.teams[hs[hs.length - 1].t] : null; };
+const espPrice = (a, team, amt) => a.kind === 'leyenda' && !a.seller && lastHuman() && lastHuman().id === team.id ? E.r1(amt * .9) : amt;
+/* premios de campeón: la liga da a elegir una leyenda entre 3; la Champions, un héroe */
+function espClaims() {
+  if (!D || !D.my) return [];
+  const t = D.my, got = t.esp || {}, out = [];
+  for (const tr of trophies(D.myIdx)) {
+    if (tr.k !== 'liga' && tr.k !== 'champions') continue;
+    const key = tr.k + tr.Sx; if (got[key]) continue;
+    const k = tr.k === 'liga' ? 'ley' : 'her', pool = espFree(k), r = E.rng('premio' + key + S.cfg.seed), opts = [];
+    const p2 = pool.slice(); while (p2.length && opts.length < (k === 'ley' ? 3 : 1)) opts.push(p2.splice(Math.floor(r() * p2.length), 1)[0]);
+    if (opts.length) out.push({ key, k, Sx: tr.Sx, opts });
+  }
+  return out;
+}
+function espClaimHTML() {
+  const cl = espClaims(); if (!cl.length) return '';
+  const t = D.my, full = t.squad.length >= SQ_MAX;
+  return cl.map(c => `<section class="panel esp-claim esp-claim-${c.k}"><h3>${c.k === 'ley' ? '🏆 Premio de campeón de liga' : '🏆 Premio de campeón de Champions'} · T${c.Sx}</h3>
+    <p class="small mute">${c.k === 'ley' ? 'Elige una leyenda para tu plantilla.' : 'Un héroe se une a tu plantilla.'}${full ? ` <b class="neg-amt">Tienes la plantilla llena (${SQ_MAX}): libera o vende a alguien primero.</b>` : ''}${espCount(t, c.k) >= ESP_MAX[c.k] ? ` <b class="neg-amt">Ya tienes el máximo de ${ESP_N[c.k].toLowerCase()}s (${ESP_MAX[c.k]}).</b>` : ''}</p>
+    <div class="esp-opts">${c.opts.map(id => `<div class="esp-opt">${espCard(id, 'sm')}<button class="btn y sm" data-act="espclaim" data-arg="${c.key}:${id}" ${full || espCount(t, c.k) >= ESP_MAX[c.k] ? 'disabled' : ''}>${c.k === 'ley' ? 'Elegir' : 'Recoger'}</button></div>`).join('')}</div></section>`).join('');
+}
+async function espClaim(arg) {
+  const [key, pid] = arg.split(':'), t = D.my, c = espClaims().find(x => x.key === key);
+  if (!t || !c || !c.opts.includes(pid) || t.squad.length >= SQ_MAX || espCount(t, c.k) >= ESP_MAX[c.k] || D.owned.has(pid)) return toast('No se puede recoger ahora');
+  if (!(await lockPlayer(pid))) return toast('Inténtalo en unos segundos');
+  await saveTeam(t.id, { squad: [...t.squad, pid], esp: { ...(t.esp || {}), [key]: pid }, ledger: ledgerAdd(t, 0, 'Premio de campeón: ' + E.player(pid).name) });
+  S.modal = { type: 'espwin', pid }; render();
+}
+
 /* fin de temporada: un día de descanso y la siguiente arranca sola */
 async function seasonRoll() {
   if (!D || !D.done || !S.canWrite || S.cfg.season !== D.Sx) return false;
@@ -780,7 +861,7 @@ async function settleAuctions() {
   const byTeam = {}; [...(a.bids || []), ...aiBids(a)].forEach(b => { if (!byTeam[b.team] || b.amt > byTeam[b.team].amt) byTeam[b.team] = b; });
   const order = Object.values(byTeam).sort((x, y) => y.amt - x.amt);
   let winner = null;
-  for (const b of order) { const tm = S.teams[b.team]; if (tm && D.fin(tm.idx).cash >= b.amt && tm.squad.length < SQ_MAX) { winner = b; break; } }
+  for (const b of order) { const tm = S.teams[b.team]; if (tm && D.fin(tm.idx).cash >= espPrice(a, tm, b.amt) && tm.squad.length < SQ_MAX && !espFull(tm, a.pid)) { winner = { ...b, amt: espPrice(a, tm, b.amt) }; break; } }
   const seller = a.seller ? S.teams[a.seller] : null;
   if (winner && seller && !seller.squad.includes(a.pid)) winner = null;
   if (winner && !seller && D.owned.has(a.pid)) winner = null;
@@ -793,15 +874,16 @@ async function settleAuctions() {
   return true;
 }
 function auctionsView() {
-  const list = Object.values(S.auctions), open = list.filter(a => a.status === 'open').sort((a, b) => a.ends - b.ends), done = list.filter(a => a.status !== 'open').sort((a, b) => b.ends - a.ends).slice(0, 6);
+  const list = Object.values(S.auctions), open = list.filter(a => a.status === 'open').sort((a, b) => (espOf(b.pid) === 'ley') - (espOf(a.pid) === 'ley') || !!espOf(b.pid) - !!espOf(a.pid) || a.ends - b.ends), done = list.filter(a => a.status !== 'open').sort((a, b) => b.ends - a.ends).slice(0, 6);
   const row = a => { const p = E.player(a.pid), tb = topBid(a), lead = tb ? S.teams[tb.team] : null, mine = tb && D.my && tb.team === D.my.id, nb = nextBid(a), seller = a.seller ? S.teams[a.seller] : null;
-    return `<div class="auc"><button class="prow" data-act="player" data-arg="${a.pid}"><span class="av">${shirt('#5b6b94', '#ffffff', '', 38)}<span class="pos ${lineOf(p.pos)}">${p.pos}</span></span><span class="pname">${esc(p.name)}<small>${stars(ovrOf(a.pid, seller))} · ${E.age(p, D.Sx)} años · ${seller ? 'Vende ' + esc(seller.name) : 'Agente libre'}</small></span><span class="val">${tb ? money(tb.amt) : 'Salida ' + money(a.min)}</span><span class="ovr">${ovrOf(a.pid, seller)}</span></button>
-    <div class="auc-b"><span class="small ${mine ? 'pos-amt' : 'mute'}">${aucTag(a, seller)} ${tb ? (mine ? 'Vas ganando' : 'Gana ' + esc(lead ? lead.name : '?')) : 'Sin pujas'}${aiBids(a).length ? ' · <b class="ai-int">la IA está interesada</b>' : ''} · termina <b data-cd="${a.ends}">${cdText(a.ends)}</b></span>${D.my && (!seller || seller.id !== D.my.id) ? `<button class="btn sm y" data-act="bid" data-arg="${a.id}" ${mine ? 'disabled' : ''}>Pujar ${money(nb)} · 1 ${IC.gem}</button>` : ''}</div></div>`; };
-  return `<div class="grid"><section class="panel"><h3>Subastas abiertas</h3><ul class="facts"><li>Cada día: cracks, titulares, promesas, gangas y jugadores que vende la IA</li><li>1 ${IC.gem} por puja</li><li>Puja de último minuto: +1 min</li></ul><div class="rows">${open.map(row).join('') || '<p class="mute">No hay subastas abiertas ahora.</p>'}</div></section>
+    const k = p.esp, cost = bidCost(a), disc = k === 'ley' && !a.seller && D.my && lastHuman() && lastHuman().id === D.my.id;
+    return `<div class="auc${k ? ' auc-' + k : ''}"><button class="prow" data-act="player" data-arg="${a.pid}"><span class="av">${k ? espCard(a.pid, 'xs') : `${shirt('#5b6b94', '#ffffff', '', 38)}<span class="pos ${lineOf(p.pos)}">${p.pos}</span>`}</span><span class="pname">${esc(p.name)} ${k ? flag(p.nat) : ''}<small>${k ? `${ESP_N[k]} · ${p.pos} · ${p.nat}` : `${stars(ovrOf(a.pid, seller))} · ${E.age(p, D.Sx)} años`} · ${seller ? 'Vende ' + esc(seller.name) : k ? 'Subasta especial' : 'Agente libre'}</small></span><span class="val">${tb ? money(tb.amt) : 'Salida ' + money(a.min)}</span><span class="ovr">${ovrOf(a.pid, seller)}</span></button>
+    <div class="auc-b"><span class="small ${mine ? 'pos-amt' : 'mute'}">${aucTag(a, seller)} ${tb ? (mine ? 'Vas ganando' : 'Gana ' + esc(lead ? lead.name : '?')) : 'Sin pujas'}${aiBids(a).length ? ' · <b class="ai-int">la IA está interesada</b>' : ''} · termina <b data-cd="${a.ends}">${cdText(a.ends)}</b></span>${D.my && (!seller || seller.id !== D.my.id) ? `<button class="btn sm y" data-act="bid" data-arg="${a.id}" ${mine ? 'disabled' : ''}>Pujar ${money(nb)} · ${cost} ${IC.gem}</button>` : ''}${disc ? '<span class="small pos-amt" style="flex-basis:100%">Vas último entre los amigos: si ganas, pagas un 10% menos.</span>' : ''}</div></div>`; };
+  return `<div class="grid"><section class="panel"><h3>Subastas abiertas</h3><ul class="facts"><li>Cada día: cracks, titulares, promesas, gangas y jugadores que vende la IA</li><li>Héroe cada 3 días · Leyenda los domingos a las 20:00</li><li>1 ${IC.gem} por puja (2 en leyendas)</li><li>Puja de último minuto: +1 min</li></ul><div class="rows">${open.map(row).join('') || '<p class="mute">No hay subastas abiertas ahora.</p>'}</div></section>
   <section class="panel"><h3>Últimas cerradas</h3><ul class="ledger">${done.map(a => `<li><span>${esc(E.player(a.pid).name)}</span><b>${a.winner ? esc(S.teams[a.winner]?.name || '?') + ' · ' + money(a.price) : 'Sin comprador'}</b></li>`).join('') || '<li><span class="mute">Todavía ninguna.</span></li>'}</ul></section></div>`;
 }
 async function auctionMine(pid, mins = 30) {
-  const t = D.my, v = E.pval(pid, D.Sx, t.xp?.[pid] || 0), min = E.r1(v * .6);
+  const t = D.my, v = E.pval(pid, D.Sx, t.xp?.[pid] || 0), min = espOf(pid) ? ESP_MIN[espOf(pid)] : E.r1(v * .6);
   if (Object.values(S.auctions).some(a => a.pid === pid && a.status === 'open')) return toast('Ya está en subasta');
   const ref = S.db.collection('subastas').doc();
   await write('subastas/' + ref.id, () => ref.set({ id: ref.id, pid, seller: t.id, min, mins, ends: Date.now() + mins * 60000, bids: [], status: 'open', t: Date.now() }));
@@ -903,7 +985,7 @@ function homeView() {
   const cash = D.fin(D.myIdx).cash; if (cash < 0) avisos.push(`<li><b class="neg-amt">Saldo negativo.</b> Vende algún jugador o los salarios te hundirán.</li>`);
   const rows = D.table, myPos = rows.findIndex(r => r.t === D.myIdx);
   const show = rows.filter((r, k) => k < 4 || Math.abs(k - myPos) <= 1);
-  return `<div class="grid"><div class="stackp">${main}${rulCard()}${objectiveHTML()}${upcomingHTML()}${last ? `<section class="panel"><div class="ph"><h3>Último partido · J${lastDoc.md}</h3><button class="btn sm" data-act="match" data-arg="${lastDoc.season}-${lastDoc.md}-${lastDoc.m.indexOf(last)}">${IC.play}Ver partido</button></div>${matchRow(last, lastDoc, lastDoc.m.indexOf(last))}</section>` : ''}</div>
+  return `<div class="grid"><div class="stackp">${espClaimHTML()}${main}${rulCard()}${objectiveHTML()}${upcomingHTML()}${last ? `<section class="panel"><div class="ph"><h3>Último partido · J${lastDoc.md}</h3><button class="btn sm" data-act="match" data-arg="${lastDoc.season}-${lastDoc.md}-${lastDoc.m.indexOf(last)}">${IC.play}Ver partido</button></div>${matchRow(last, lastDoc, lastDoc.m.indexOf(last))}</section>` : ''}</div>
   <div class="stackp"><section class="panel"><div class="ph"><h3>Clasificación</h3><button class="btn sm ghost" data-act="go" data-arg="liga:tabla">Completa</button></div>${tableHTML(show, true)}</section>${prensaHTML()}${muroHTML(4)}
   <section class="panel"><h3>Avisos del míster</h3>${avisos.length ? `<ul class="small" style="padding-left:18px;margin:8px 0 0">${avisos.join('')}</ul>` : '<p class="mute small">Todo en orden, míster.</p>'}</section></div></div>`;
 }
@@ -969,8 +1051,8 @@ function fitClass(id, pos) { const f = E.fit(E.player(id).pos, pos); return f >=
 function tokHTML(id, pos, k, i, style) {
   const sel = S.sel && S.sel.k === k && S.sel.i === i, t = D.my, c1 = t.colors[0], c2 = t.colors[1];
   if (!id) return `<button class="tok empty ${sel ? 'sel' : ''}" style="${style}" data-act="slot" data-arg="${k}:${i}" aria-label="Puesto ${pos || 'suplente'} vacío"><span class="jw">${shirt('#ffffff22', '#ffffff', '+', 44)}</span><span class="n">${pos || 'Vacío'}</span></button>`;
-  const p = E.player(id), st = status(id), c = cond(id), isGk = p.pos === 'POR';
-  return `<button class="tok ${pos ? fitClass(id, pos) : ''} ${st ? 'out' : ''} ${sel ? 'sel' : ''}" style="${style}" data-act="slot" data-arg="${k}:${i}" aria-label="${esc(p.name)}, ${pos || p.pos}"><span class="jw">${shirt(isGk ? '#facc15' : c1, isGk ? '#111111' : c2, ovrOf(id, t), 44)}</span><span class="n">${esc(surname(p.name))}</span><span class="e"><i style="width:${c}%;${c < 75 ? 'background:var(--warn)' : ''}"></i></span></button>`;
+  const p = E.player(id), st = status(id), c = cond(id), isGk = p.pos === 'POR', ek = p.esp;
+  return `<button class="tok ${ek ? 'tok-' + ek + ' ' : ''}${pos ? fitClass(id, pos) : ''} ${st ? 'out' : ''} ${sel ? 'sel' : ''}" style="${style}" data-act="slot" data-arg="${k}:${i}" aria-label="${esc(p.name)}, ${pos || p.pos}"><span class="jw">${ek ? `<span class="aura"></span>${ek === 'ley' ? LAUREL : STAR}` : ''}${ek ? shirt(`url(#espg-${ek})`, ek === 'ley' ? '#5a3a00' : '#06204a', ovrOf(id, t), 44) : shirt(isGk ? '#facc15' : c1, isGk ? '#111111' : c2, ovrOf(id, t), 44)}</span><span class="n">${esc(surname(p.name))}</span><span class="e"><i style="width:${c}%;${c < 75 ? 'background:var(--warn)' : ''}"></i></span></button>`;
 }
 function lineupView() {
   const L = ensureLin(), t = D.my, slots = E.FORMS[L.form], co = E.COORD[L.form], ctx = D.ctx(t);
@@ -1000,7 +1082,7 @@ function pickerHTML(L) {
   const cur = S.sel.k === 'xi' ? L.xi[S.sel.i] : L.bench[S.sel.i];
   return `<div class="ph"><h3>${pos ? 'Elige ' + pos : 'Elige suplente'}</h3><div style="display:flex;gap:6px">${cur ? `<button class="btn sm ghost" data-act="clearslot">Dejar vacío</button>` : ''}<button class="btn sm ghost" data-act="unsel">Cerrar</button></div></div>
   <div class="rows">${ids.map(id => { const p = E.player(id), where = L.xi.indexOf(id) >= 0 ? 'Titular' : L.bench.indexOf(id) >= 0 ? 'Banquillo' : '', st = status(id), f = pos ? Math.round(E.fit(p.pos, pos) * 100) : null;
-    return `<button class="prow" data-act="assign" data-arg="${id}"><span class="pos ${lineOf(p.pos)}">${p.pos}</span><span class="pname">${esc(p.name)}${st ? `<span class="tag ${st.why === 'Lesión' ? 'inj' : 'sus'}">${st.why} ${st.n}j</span>` : ''}<small>${where ? where + ' · ' : ''}${f != null ? 'Encaje ' + f + '% · ' : ''}Forma ${cond(id)}%</small></span><span class="val">${pos ? Math.round(ctx.eff(id, pos)) + ' ef.' : ''}</span><span class="ovr">${ovrOf(id, D.my)}</span></button>`; }).join('')}</div>`;
+    return `<button class="prow" data-act="assign" data-arg="${id}"><span class="pos ${lineOf(p.pos)}">${p.pos}</span><span class="pname">${esc(p.name)}${espBadge(id)}${st ? `<span class="tag ${st.why === 'Lesión' ? 'inj' : 'sus'}">${st.why} ${st.n}j</span>` : ''}<small>${where ? where + ' · ' : ''}${f != null ? 'Encaje ' + f + '% · ' : ''}Forma ${cond(id)}%</small></span><span class="val">${pos ? Math.round(ctx.eff(id, pos)) + ' ef.' : ''}</span><span class="ovr">${ovrOf(id, D.my)}</span></button>`; }).join('')}</div>`;
 }
 function saveLin() {
   const L = S.lin, t = D.my; if (!L || !t) return;
@@ -1032,8 +1114,8 @@ function squadList(t, actPrefix) {
 }
 function playerRow(id, t, extra) {
   const p = E.player(id), own = t || (D.owned.has(id) ? ownerOf(id) : null), st = D.owned.has(id) ? status(id) : null, o = ovrOf(id, own), v = E.value(o, E.age(p, D.Sx)), c = cond(id);
-  const cols = own ? own.colors : ['#5b6b94', '#ffffff'], gk = p.pos === 'POR';
-  return `<button class="prow" data-act="player" data-arg="${id}"><span class="av">${shirt(gk && own ? '#facc15' : cols[0], gk && own ? '#111111' : cols[1], '', 38)}<span class="pos ${lineOf(p.pos)}">${p.pos}</span></span><span class="pname">${esc(p.name)}${st ? `<span class="tag ${st.why === 'Lesión' ? 'inj' : 'sus'}">${st.why} ${st.n}j</span>` : ''}<small>${stars(o)} · ${p.nat} · ${E.age(p, D.Sx)} años${extra ? ' · ' + extra : ''}</small>${t ? `<span class="cond"><i style="width:${c}%;${c < 75 ? 'background:var(--warn)' : ''}"></i></span>` : ''}</span><span class="val">${money(v)}</span><span class="ovr">${o}</span></button>`;
+  const cols = own ? own.colors : ['#5b6b94', '#ffffff'], gk = p.pos === 'POR', k = p.esp;
+  return `<button class="prow${k ? ' esp-' + k : ''}" data-act="player" data-arg="${id}"><span class="av">${k ? shirt(`url(#espg-${k})`, k === 'ley' ? '#fff3c4' : '#e8f4ff', '', 38) : shirt(gk && own ? '#facc15' : cols[0], gk && own ? '#111111' : cols[1], '', 38)}<span class="pos ${lineOf(p.pos)}">${p.pos}</span></span><span class="pname">${esc(p.name)}${espBadge(id)}${st ? `<span class="tag ${st.why === 'Lesión' ? 'inj' : 'sus'}">${st.why} ${st.n}j</span>` : ''}<small>${stars(o)} · ${k ? flag(p.nat) : ''}${p.nat} · ${k ? ESP_N[k] : E.age(p, D.Sx) + ' años'}${extra ? ' · ' + extra : ''}</small>${t ? `<span class="cond"><i style="width:${c}%;${c < 75 ? 'background:var(--warn)' : ''}"></i></span>` : ''}</span><span class="val">${money(v)}</span><span class="ovr">${o}</span></button>`;
 }
 function squadView() {
   const t = D.my, avg = Math.round(t.squad.reduce((a, id) => a + ovrOf(id, t), 0) / t.squad.length);
@@ -1104,7 +1186,7 @@ function leagueView() {
 // subastas nuevas desde la última vez que miraste el mercado
 const aucSeen = () => { try { return +localStorage.getItem('aucSeen') || 0; } catch (e) { return 0; } };
 const newAuctions = () => !D || !D.my ? 0 : Object.values(S.auctions).filter(a => a.status === 'open' && a.ends > Date.now() && a.seller !== D.my.id && (a.t || 0) > aucSeen()).length;
-const AUC_TAG = { estrella: '⭐ Crack', titular: 'Titular', joven: 'Promesa', veterano: 'Veterano', ganga: 'Ganga', ia: 'Vende la IA' };
+const AUC_TAG = { leyenda: '🏆 Subasta de leyenda', heroe: '⭐ Subasta de héroe', estrella: '⭐ Crack', titular: 'Titular', joven: 'Promesa', veterano: 'Veterano', ganga: 'Ganga', ia: 'Vende la IA' };
 const aucTag = (a, seller) => { const l = seller && seller.owner ? 'Vende ' + seller.name : AUC_TAG[a.kind] || (seller ? 'Vende la IA' : ''); return l ? `<span class="auc-tag${seller && seller.owner ? ' friend' : ''}">${esc(l)}</span>` : ''; };
 const AUC_DUR = [[30, '30 minutos'], [120, '2 horas'], [360, '6 horas'], [720, '12 horas'], [1440, '24 horas']];
 const durTxt = m => (AUC_DUR.find(x => x[0] === m) || [0, m + ' min'])[1];
@@ -1254,6 +1336,7 @@ function modal() {
   if (m.type === 'tuto') return tutoHTML(m.i);
   let inner = '';
   if (m.type === 'ruleta') return rulModal(m);
+  if (m.type === 'espwin') { const p = E.player(m.pid); return `<div class="ov rl-ov" data-act="ovclose"><div class="esp-win esp-win-${p.esp}" role="dialog" aria-modal="true" aria-label="${esc(p.name)}"><div class="rl-rays"></div>${espCard(m.pid, 'big')}<h2>¡${esc(p.name)}!</h2><p>Nueva ${p.esp === 'ley' ? 'leyenda' : 'carta de héroe'} en tu plantilla.</p><button class="btn y" data-act="close">¡Vamos!</button></div></div>`; }
   if (m.type === 'pack') return `<div class="ov pack-ov"><div class="pack-sheet" role="dialog" aria-modal="true" aria-label="Abriendo ${PACKS[m.kind].name}">${packModal(m)}</div></div>`;
   if (m.type === 'player') inner = playerModal(m.id);
   if (m.type === 'auction') { const p = E.player(m.id), v = E.pval(m.id, D.Sx, D.my.xp?.[m.id] || 0); let dv = 720; try { dv = +localStorage.getItem('auc-dur') || 720; } catch (e) {}
@@ -1280,9 +1363,9 @@ function playerModal(id) {
   let acts = '';
   if (D.my && !own) acts = `<button class="btn y" data-act="buyfree" data-arg="${id}" ${canAfford(v) && D.my.squad.length < SQ_MAX ? '' : 'disabled'}>Fichar por ${money(v)}</button>`;
   else if (D.my && own && !mine) acts = own.owner ? `<button class="btn y" data-act="offer" data-arg="${id}">Hacer oferta</button>` : `<button class="btn y" data-act="buyai" data-arg="${id}" ${canAfford(E.r1(v * 1.35)) && D.my.squad.length < SQ_MAX && own.squad.length > 17 ? '' : 'disabled'}>Comprar por ${money(E.r1(v * 1.35))}</button>${own.squad.length <= 17 ? '<p class="small mute">La IA no vende: se quedaría corta de plantilla.</p>' : ''}`;
-  else if (mine) acts = `${ss && ss.why === 'Lesión' ? `<button class="btn y" data-act="heal" data-arg="${id}">Curar · ${D.my.items?.cura > 0 ? 'bono' : '4 tokens'}</button>` : ''}${!ss && cond(id) < 100 ? `<button class="btn y" data-act="boost" data-arg="${id}">Forma al 100% · ${D.my.items?.forma > 0 ? 'bono' : '2 tokens'}</button>` : ''}<button class="btn" data-act="auction" data-arg="${id}" ${D.my.squad.length > SQ_MIN ? '' : 'disabled'}>Subastar 30 min</button><button class="btn ghost" data-act="release" data-arg="${id}" ${D.my.squad.length > SQ_MIN ? '' : 'disabled'}>Liberar y cobrar ${money(E.r1(v * .5))}</button>`;
+  else if (mine) acts = `${ss && ss.why === 'Lesión' ? `<button class="btn y" data-act="heal" data-arg="${id}">Curar · ${D.my.items?.cura > 0 ? 'bono' : '4 tokens'}</button>` : ''}${!ss && cond(id) < 100 ? `<button class="btn y" data-act="boost" data-arg="${id}">Forma al 100% · ${D.my.items?.forma > 0 ? 'bono' : '2 tokens'}</button>` : ''}<button class="btn" data-act="auction" data-arg="${id}" ${D.my.squad.length > SQ_MIN ? '' : 'disabled'}>Subastar 30 min</button>${espOf(id) ? '' : `<button class="btn ghost" data-act="release" data-arg="${id}" ${D.my.squad.length > SQ_MIN ? '' : 'disabled'}>Liberar y cobrar ${money(E.r1(v * .5))}</button>`}`;
   const cols = own ? own.colors : ['#5b6b94', '#ffffff'];
-  return `<div class="pcard">${shirt(p.pos === 'POR' && own ? '#facc15' : cols[0], p.pos === 'POR' && own ? '#111111' : cols[1], '', 70)}<div style="flex:1"><h2>${esc(p.name)}</h2><div class="mute"><span class="pos ${lineOf(p.pos)}">${p.pos}</span> ${p.nat} · ${a} años · ${own ? esc(own.name) : 'Sin equipo'}</div><div style="margin-top:4px">${stars(o)}</div></div><span class="ovr">${o}</span></div>
+  return `${p.esp ? `<div class="esp-modal">${espCard(id, 'mid', o)}<p class="small mute">${p.esp === 'ley' ? 'Leyenda' : 'Héroe'}: no baja de media con la edad, no se puede liberar ni vender a la IA. Máximo ${ESP_MAX[p.esp]} por plantilla.</p></div>` : ''}<div class="pcard">${shirt(p.pos === 'POR' && own ? '#facc15' : cols[0], p.pos === 'POR' && own ? '#111111' : cols[1], '', 70)}<div style="flex:1"><h2>${esc(p.name)}</h2><div class="mute"><span class="pos ${lineOf(p.pos)}">${p.pos}</span> ${p.nat} · ${a} años · ${own ? esc(own.name) : 'Sin equipo'}</div><div style="margin-top:4px">${stars(o)}</div></div><span class="ovr">${o}</span></div>
   ${ss ? `<p class="note bad">${ss.why}: ${ss.n} jornada${ss.n > 1 ? 's' : ''} más.</p>` : ''}
   <div class="attrs">${(() => { const at = E.attrs(id, o), ks = p.pos === 'POR' ? ['por', 'fis', 'pas', 'vel'] : E.ATR; return ks.map(k => `<div><span>${E.ATR_N[k]}</span><span class="ab"><i style="width:${at[k]}%;background:${at[k] >= 85 ? 'var(--good)' : at[k] >= 70 ? 'var(--gold)' : 'var(--warn)'}"></i></span><b>${at[k]}</b></div>`).join(''); })()}</div>
   <div class="kv" style="margin:14px 0"><div><b>${money(v)}</b><span>Valor</span></div><div><b>${moneyK(E.wage(v))}</b><span>Salario por jornada</span></div><div><b>~${Math.round(Math.min(95, Math.max(p.base, E.pot(p))))}</b><span>Techo estimado</span></div><div><b>${own ? cond(id) + '%' : '100%'}</b><span>Forma</span></div><div><b>${st.apps || 0}</b><span>Partidos</span></div><div><b>${st.g || 0} / ${st.a || 0}</b><span>Goles / asist.</span></div><div><b>${st.apps ? (st.rs / st.apps).toFixed(1) : '–'}</b><span>Nota media</span></div></div>
@@ -1364,6 +1447,7 @@ async function buyAI(pid) {
   await movePlayer(own, D.my, pid, price); S.modal = null; toast('Fichado ' + E.player(pid).name); render();
 }
 async function release(pid) {
+  if (espOf(pid)) return toast('Las leyendas y los héroes no se pueden liberar: súbastalo o véndelo a un amigo');
   const t = D.my, v = E.r1(E.pval(pid, D.Sx, t.xp?.[pid] || 0) * .5);
   if (t.squad.length <= SQ_MIN) return;
   const xp = { ...(t.xp || {}) }; delete xp[pid];
@@ -1376,6 +1460,7 @@ async function sendOffer(pid) {
   const price = E.r1(+$('#o-price').value), own = ownerOf(pid);
   if (!(price > 0)) return toast('Pon una cantidad');
   if (!canAfford(price)) return toast('No te llega el dinero');
+  if (espFull(D.my, pid)) return toast('Ya tienes el máximo de ' + ESP_N[espOf(pid)].toLowerCase() + 's (' + ESP_MAX[espOf(pid)] + ')');
   const ref = S.db.collection('ofertas').doc();
   await write('ofertas/' + ref.id, () => ref.set({ id: ref.id, from: D.my.id, to: own.id, pid, price, status: 'pend', t: Date.now() }));
   S.modal = null; toast('Oferta enviada'); render();
@@ -1386,6 +1471,7 @@ async function acceptOffer(oid) {
   if (!from.squad.includes(o.pid)) { await setOffer(oid, 'no'); return toast('Ese jugador ya no está en tu plantilla'); }
   if (from.squad.length <= SQ_MIN) return toast('Te quedarías con menos de ' + SQ_MIN + ' jugadores');
   if (to.squad.length >= SQ_MAX) return toast('El comprador tiene la plantilla llena');
+  if (espFull(to, o.pid)) { await setOffer(oid, 'no'); return toast('El comprador ya tiene el máximo de ' + ESP_N[espOf(o.pid)].toLowerCase() + 's'); }
   if (D.fin(to.idx).cash < o.price) return toast('Al comprador no le llega el dinero');
   await movePlayer(from, to, o.pid, o.price); await setOffer(oid, 'ok');
   if (S.lin) { S.lin.xi = S.lin.xi.map(x => x === o.pid ? null : x); S.lin.bench = S.lin.bench.filter(x => x !== o.pid); }
@@ -1413,6 +1499,7 @@ const ACT = {
   },
   friendly: () => { S.modal = { type: 'friendly' }; render(); },
   pack: a => { const [k, pay] = a.split(':'); openPack(k, pay); },
+  espclaim: a => espClaim(a),
   rulopen: () => { S.modal = { type: 'ruleta', phase: 'idle' }; render(); },
   rulspin: (a, el) => { if (el.getAttribute('aria-disabled') === 'true') { const st = rulState(D.my); return toast(a === 'free' ? 'La tirada gratis vuelve mañana' : st.paid >= RUL_MAXPAID ? 'Ya no quedan tiradas extra hoy' : S.modal?.phase === 'spin' ? 'Espera a que pare' : 'No tienes tokens suficientes'); } rulSpin(a); },
   rulok: () => { S.modal = { type: 'ruleta', phase: 'idle' }; render(); },

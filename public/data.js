@@ -296,3 +296,93 @@ window.GEN_NAMES = {
   last: ["García","Martín","López","Sánchez","Romero","Navarro","Torres","Domínguez","Vázquez","Ramos","Gil","Serrano","Molina","Morales","Ortega","Delgado","Castro","Ortiz","Rubio","Marín","Iglesias","Medina","Garrido","Cortés","Castillo","Santos","Lozano","Guerrero","Cano","Prieto","Méndez","Cruz","Calvo","Gallego","Vidal","León","Herrera","Peña","Flores","Cabrera","Campos","Vega","Fuentes","Carrasco","Diez","Caballero","Reyes","Nieto","Aguilar","Pascual","El Amrani","Benali","Haddad","Ziani","Rifi","Bouzid","Silva","Costa","Pereira","Ferreira"],
   nat: ["ESP","ESP","ESP","ESP","MAR","POR","ARG","FRA","BRA","COL","URU","ITA"]
 };
+
+/* Cartas especiales: tipo (ley = Leyenda, her = Héroe);id;nombre;posición;media;país;figura de la carta.
+   Los id no se cambian nunca (los equipos los guardan). Para añadir una carta, ponla al final con un id nuevo. */
+window.ESP_RAW = `ley;ley-1;Pelé;DC;96;BRA;del
+ley;ley-2;Diego Maradona;MCO;96;ARG;mco
+ley;ley-3;Ronaldo Nazário;DC;95;BRA;run
+ley;ley-4;Zinédine Zidane;MCO;95;FRA;mco
+ley;ley-5;Ferenc Puskás;DC;94;HUN;chi
+ley;ley-6;Johan Cruyff;DC;94;NED;run
+ley;ley-7;Michel Platini;MCO;94;FRA;cel
+ley;ley-8;Marco van Basten;DC;94;NED;chi
+ley;ley-9;Ronaldinho;EI;94;BRA;mco
+ley;ley-10;Paolo Maldini;DFC;94;ITA;def
+ley;ley-11;Franz Beckenbauer;DFC;94;GER;def
+ley;ley-12;Eusébio;DC;93;POR;del
+ley;ley-13;Thierry Henry;DC;93;FRA;run
+ley;ley-14;Lev Yashin;POR;93;RUS;por
+ley;ley-15;Franco Baresi;DFC;92;ITA;ent
+ley;ley-16;Ruud Gullit;MC;92;NED;cab
+ley;ley-17;Andrés Iniesta;MC;92;ESP;mco
+ley;ley-18;Gianluigi Buffon;POR;92;ITA;por
+ley;ley-19;Xavi Hernández;MC;92;ESP;run
+ley;ley-20;Roberto Carlos;LI;92;BRA;ent
+ley;ley-21;Cafu;LD;92;BRA;run
+ley;ley-22;Kaká;MCO;91;BRA;run
+ley;ley-23;Andrea Pirlo;MC;91;ITA;mco
+ley;ley-24;Fabio Cannavaro;DFC;91;ITA;ent
+ley;ley-25;Luís Figo;ED;91;POR;mco
+ley;ley-26;Andriy Shevchenko;DC;91;UKR;cel
+ley;ley-27;Iker Casillas;POR;91;ESP;por
+ley;ley-28;Alessandro Nesta;DFC;90;ITA;def
+ley;ley-29;Raúl González;DC;90;ESP;cel
+ley;ley-30;Steven Gerrard;MC;90;ENG;cab
+ley;ley-31;Didier Drogba;DC;89;CIV;cab
+ley;ley-32;Samuel Eto'o;DC;89;CMR;del
+ley;ley-33;Carles Puyol;DFC;89;ESP;cab
+ley;ley-34;Franck Ribéry;EI;89;FRA;run
+ley;ley-35;Frank Lampard;MC;89;ENG;cel
+ley;ley-36;Philipp Lahm;LD;89;GER;ent
+ley;ley-37;Wayne Rooney;DC;89;ENG;chi
+ley;ley-38;Clarence Seedorf;MC;89;NED;mco
+ley;ley-39;Xabi Alonso;MC;88;ESP;mco
+her;her-1;Arjen Robben;ED;89;NED;run
+her;her-2;David Villa;DC;89;ESP;cel
+her;her-3;Eden Hazard;EI;88;BEL;mco
+her;her-4;Yaya Touré;MC;88;CIV;run
+her;her-5;Fernando Torres;DC;88;ESP;del
+her;her-6;Javier Zanetti;LD;88;ARG;ent
+her;her-7;Juan Román Riquelme;MCO;88;ARG;mco
+her;her-8;Carlos Tévez;DC;87;ARG;cel
+her;her-9;Diego Forlán;DC;87;URU;chi
+her;her-10;Claude Makélélé;MCD;87;FRA;def
+her;her-11;Wesley Sneijder;MCO;87;NED;mco
+her;her-12;Jay-Jay Okocha;MCO;86;NGA;run
+her;her-13;Dimitar Berbatov;DC;86;BUL;del
+her;her-14;Diego Milito;DC;86;ARG;cab
+her;her-15;Rafa Márquez;DFC;86;MEX;def
+her;her-16;Joaquín;ED;85;ESP;run
+her;her-17;Marek Hamšík;MC;85;SVK;mco
+her;her-18;Antonio Di Natale;DC;85;ITA;chi
+her;her-19;Fernando Morientes;DC;85;ESP;cab
+her;her-20;Mario Gómez;DC;85;GER;cel
+her;her-21;Tim Cahill;MCO;84;AUS;cab
+her;her-22;Iván Córdoba;DFC;84;COL;ent`;
+
+/* banderas (SVG 30x20) de los países de las cartas especiales; las usan el juego y el bot */
+window.FLAGS = {
+  BRA: '<rect width="30" height="20" fill="#1c9a3e"/><path d="M15 2.6 27.6 10 15 17.4 2.4 10z" fill="#ffd60a"/><circle cx="15" cy="10" r="4.6" fill="#1f3c8f"/>',
+  ARG: '<rect width="30" height="20" fill="#74acdf"/><rect y="6.67" width="30" height="6.67" fill="#fff"/><circle cx="15" cy="10" r="2" fill="#f6b40e"/>',
+  FRA: '<rect width="30" height="20" fill="#ef4135"/><rect width="20" height="20" fill="#fff"/><rect width="10" height="20" fill="#0055a4"/>',
+  NED: '<rect width="30" height="20" fill="#21468b"/><rect width="30" height="13.33" fill="#fff"/><rect width="30" height="6.67" fill="#ae1c28"/>',
+  ITA: '<rect width="30" height="20" fill="#ce2b37"/><rect width="20" height="20" fill="#f4f5f0"/><rect width="10" height="20" fill="#009246"/>',
+  GER: '<rect width="30" height="20" fill="#ffce00"/><rect width="30" height="13.33" fill="#dd0000"/><rect width="30" height="6.67" fill="#111"/>',
+  RUS: '<rect width="30" height="20" fill="#d52b1e"/><rect width="30" height="13.33" fill="#0039a6"/><rect width="30" height="6.67" fill="#fff"/>',
+  ESP: '<rect width="30" height="20" fill="#c60b1e"/><rect y="5" width="30" height="10" fill="#ffc400"/>',
+  POR: '<rect width="30" height="20" fill="#da291c"/><rect width="12" height="20" fill="#046a38"/><circle cx="12" cy="10" r="3.6" fill="#ffe000"/><circle cx="12" cy="10" r="2" fill="#da291c"/>',
+  HUN: '<rect width="30" height="20" fill="#436f4d"/><rect width="30" height="13.33" fill="#fff"/><rect width="30" height="6.67" fill="#cd2a3e"/>',
+  UKR: '<rect width="30" height="20" fill="#ffd700"/><rect width="30" height="10" fill="#0057b7"/>',
+  ENG: '<rect width="30" height="20" fill="#fff"/><rect x="12.5" width="5" height="20" fill="#ce1124"/><rect y="7.5" width="30" height="5" fill="#ce1124"/>',
+  CIV: '<rect width="30" height="20" fill="#009e60"/><rect width="20" height="20" fill="#fff"/><rect width="10" height="20" fill="#f77f00"/>',
+  CMR: '<rect width="30" height="20" fill="#fcd116"/><rect width="20" height="20" fill="#ce1126"/><rect width="10" height="20" fill="#007a5e"/>',
+  BEL: '<rect width="30" height="20" fill="#ef3340"/><rect width="20" height="20" fill="#fdda24"/><rect width="10" height="20" fill="#111"/>',
+  URU: '<rect width="30" height="20" fill="#fff"/><g fill="#0038a8"><rect x="10" y="2.2" width="20" height="2.2"/><rect x="10" y="6.7" width="20" height="2.2"/><rect y="11.1" width="30" height="2.2"/><rect y="15.6" width="30" height="2.2"/></g><circle cx="5" cy="5.5" r="2.8" fill="#fcd116"/>',
+  NGA: '<rect width="30" height="20" fill="#008751"/><rect x="10" width="10" height="20" fill="#fff"/>',
+  BUL: '<rect width="30" height="20" fill="#d62612"/><rect width="30" height="13.33" fill="#00966e"/><rect width="30" height="6.67" fill="#fff"/>',
+  MEX: '<rect width="30" height="20" fill="#ce1126"/><rect width="20" height="20" fill="#fff"/><rect width="10" height="20" fill="#006847"/><circle cx="15" cy="10" r="2.2" fill="#8c5a2b"/>',
+  COL: '<rect width="30" height="20" fill="#ce1126"/><rect width="30" height="15" fill="#003893"/><rect width="30" height="10" fill="#fcd116"/>',
+  SVK: '<rect width="30" height="20" fill="#ee1c25"/><rect width="30" height="13.33" fill="#0b4ea2"/><rect width="30" height="6.67" fill="#fff"/>',
+  AUS: '<rect width="30" height="20" fill="#012169"/><path d="M7.5 0v10M0 5h15" stroke="#fff" stroke-width="3"/><path d="M7.5 0v10M0 5h15" stroke="#c8102e" stroke-width="1.5"/><g fill="#fff"><circle cx="22" cy="4" r=".9"/><circle cx="25" cy="8" r=".9"/><circle cx="22" cy="15" r="1"/><circle cx="7.5" cy="15" r="1.6"/></g>'
+};

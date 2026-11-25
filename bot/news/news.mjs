@@ -83,6 +83,12 @@ const T = {
     return `<section class="c pt" id="nR"><span class="k">NOVEDAD</span><h1>Llega la <em>ruleta</em></h1><div class="sub">Una tirada gratis cada día</div>
     <div class="wh"><svg viewBox="0 0 400 400" style="transform:rotate(-18deg)"><defs>${defs}</defs>${body}</svg><img class="rg" src="../img/ruleta/r0.webp"><img class="hb" src="../img/ruleta/r2.webp"><img class="pp" src="../img/ruleta/r1.webp"></div>
     <div class="foot">Gira en <b>Inicio → Ruleta diaria</b> · extra por 2 tokens</div></section>`; },
+  carta: d => {
+    const card = c => `<div class="lc lc-${c.esp}"><img class="lc-fr" src="../img/esp/${c.esp === 'her' ? 'marco-heroe' : 'marco'}.webp"><img class="lc-fig" src="../img/esp/fig-${c.fig}.webp"><div class="lc-ovr"><b>${c.o}</b><span>${c.pos}</span>${c.flag}</div><div class="lc-bot"><span class="lc-tag">${c.esp === 'her' ? 'HÉROE' : 'LEYENDA'}</span><b class="lc-name" style="font-size:${c.name.length <= 11 ? 10.5 : c.name.length <= 14 ? 8.6 : c.name.length <= 17 ? 7.4 : 6.6}cqw">${esc(c.name)}</b><span class="lc-meta">${c.flag}${c.nat}</span></div></div>`;
+    const many = (d.cards || []).length > 1;
+    return `<section class="c pt" id="nC" data-k="${d.k || 'ley'}"><span class="k">${esc(d.tag || 'SUBASTA')}</span><h1>${d.title}</h1><div class="sub">${esc(d.sub || '')}</div>
+    <div class="cards${many ? ' many' : ''}">${(d.cards || []).map(card).join('')}</div>
+    ${d.foot ? `<div class="foot">${d.foot}</div>` : ''}</section>`; },
   expectativa: d => `<section class="c sq" id="n14"><div class="p p1"><span class="lb">Expectativa</span><b>${esc(d.e)}</b></div><div class="mid"></div><div class="p p2"><span class="lb">Realidad</span><b>${esc(d.r)}</b></div><div class="by">vía Kevin Golazos 😎</div></section>`
 };
 // titular en dos colores: lo que va entre *asteriscos* sale en amarillo

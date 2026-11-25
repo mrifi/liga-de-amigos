@@ -552,12 +552,34 @@ function pInfo(lg, a) {
   const p = E.player(a.pid), t = a.seller ? lg.teams[a.seller] : null;
   return { p, ovr: E.ovr(a.pid, lg.cfg.season, t?.xp?.[a.pid] || 0), age: E.age(p, lg.cfg.season) };
 }
+
+/* ---------- leyendas y héroes ---------- */
+const ESP_TXT = { ley: 'Leyenda', her: 'Héroe' };
+const espCardData = pid => { const p = E.player(pid); return { name: p.name, pos: p.pos, o: p.base, nat: p.nat, fig: p.fig, esp: p.esp, flag: ctx.FLAGS && ctx.FLAGS[p.nat] ? `<svg viewBox="0 0 30 20">${ctx.FLAGS[p.nat]}</svg>` : '' }; };
+function espAucNews(lg, chat, id, a, x) {
+  const k = E.espOf(a.pid); if (!k) return false;
+  once(lg.code + ':espauc:' + id, () => {
+    send(chat, k === 'ley'
+      ? `🏆✨ <b>¡SUBASTA DE LEYENDA!</b>\n\n<b>${esc(x.p.name)}</b> (${x.p.pos}, <b>${x.p.base}</b> de media) sale a subasta hasta mañana a las <b>${hhmm(a.ends)}</b>.\nSalida: <b>${fmtM(a.min)}</b> · cada puja cuesta <b>2 tokens</b> · la IA no puja: solo vosotros.\nEl que va último entre los amigos paga un 10% menos si gana.\nMáximo 2 leyendas por plantilla. ${SITE}`
+      : `⭐ <b>SUBASTA DE HÉROE</b>: <b>${esc(x.p.name)}</b> (${x.p.pos}, ${x.p.base} de media) hasta mañana a las ${hhmm(a.ends)}. Salida ${fmtM(a.min)}. La IA no puja. ${SITE}`);
+    queueNews(chat, async () => ({ kind: 'carta', caption: (k === 'ley' ? '🏆 Subasta de leyenda: ' : '⭐ Subasta de héroe: ') + x.p.name, data: { k, tag: k === 'ley' ? 'SUBASTA DE LEYENDA' : 'SUBASTA DE HÉROE', title: `${esc(x.p.name.split(' ').slice(-1)[0])} <em>sale a subasta</em>`, sub: `Salida ${fmtM(a.min)} · hasta mañana a las ${hhmm(a.ends)}`, cards: [espCardData(a.pid)], foot: k === 'ley' ? 'Puja en <b>Mercado → Subastas</b> · 2 tokens por puja' : 'Puja en <b>Mercado → Subastas</b>' } }), 4000);
+  });
+  return true;
+}
+function announceEsp(code) {
+  const chat = chatOf(code); if (!chat) return;
+  once(code + ':ann:esp', () => {
+    send(chat, `🏆 <b>NOVEDAD: LLEGAN LAS LEYENDAS Y LOS HÉROES</b>\n\nCartas especiales con los mejores de la historia: Pelé, Maradona, Ronaldo, Zidane, Ronaldinho, Maldini, Puyol, Ribéry… (Leyendas, 88-96 de media) y Hazard, Tévez, Yaya Touré, Robben, Villa… (Héroes, 84-89).\n\n🏆 <b>Subasta de leyenda</b>: cada domingo a las 20:00, durante 24 h. Salida 60 M€, 2 tokens por puja. El último de los amigos en la liga paga un 10% menos.\n⭐ <b>Subasta de héroe</b>: cada 3 días a las 12:00. Salida 30 M€.\n🥇 <b>Sobre de oro</b>: 3% de héroe y 0,5% de leyenda.\n👑 <b>Campeón de liga</b>: elige una leyenda entre 3. <b>Campeón de Champions</b>: un héroe.\n\nNormas: la IA no puja por ellas, no se pueden liberar ni vender a la IA, no bajan de media con la edad y máximo 2 leyendas y 3 héroes por plantilla. ${SITE}`);
+    queueNews(chat, async () => ({ kind: 'carta', caption: '🏆 Novedad: Leyendas y Héroes', data: { k: 'ley', tag: 'NOVEDAD', title: 'Leyendas <em>y Héroes</em>', sub: 'Los mejores de la historia llegan a la liga', cards: ['her-3', 'ley-1', 'ley-33'].map(espCardData), foot: 'Leyenda cada <b>domingo a las 20:00</b> · Héroe cada <b>3 días</b>' } }), 5000);
+  });
+}
 function aucNews(lg, type, id, a) {
   const chat = chatOf(lg.code); if (!chat || !a || !a.pid || !lg.cfg) return;
   const prev = lg.aucPrev[id]; lg.aucPrev[id] = a;
   const seller = a.seller ? lg.teams[a.seller] : null, sHum = !!seller?.owner, x = pInfo(lg, a);
   const fresh = (a.t || 0) > lg.boot - 60000;
   if (type === 'added' && a.status === 'open' && fresh) {
+    if (/^esp-/.test(id) && espAucNews(lg, chat, id, a, x)) return;
     if (sHum) once(lg.code + ':auc:' + id, () => send(chat, `🔨 <b>SUBASTA</b> · ${who(lg, seller.idx)} subasta a <b>${esc(x.p.name)}</b> (${x.p.pos}, ${x.ovr} de media, ${x.age} años)\nPrecio de salida: <b>${fmtM(a.min)}</b> · termina a las <b>${hhmm(a.ends)}</b>${a.mins ? ' (' + durTxt(a.mins) + ')' : ''}\n¡A pujar! ${SITE}`));
     if (/^auto-.*-0$/.test(id)) once(lg.code + ':mkt:' + id, () => setTimeout(() => {
       const day = id.replace(/-0$/, '-'), list = Object.entries(lg.auc).filter(([k, v]) => k.startsWith(day) && v.status === 'open').map(([, v]) => v);
@@ -570,6 +592,11 @@ function aucNews(lg, type, id, a) {
     const top = b => (b || []).reduce((m, z) => (!m || z.amt > m.amt ? z : m), null), t1 = top(a.bids), t0 = top(prev.bids);
     if (t1 && t0 && t1.team !== t0.team && lg.teams[t1.team]?.owner && lg.teams[t0.team]?.owner)
       once(lg.code + ':outbid:' + id + ':' + (a.bids || []).length, () => send(chat, `⚔️ ${who(lg, lg.teams[t1.team].idx)} supera la puja de ${who(lg, lg.teams[t0.team].idx)} por <b>${esc(x.p.name)}</b>: ${fmtM(t1.amt)}. Termina a las ${hhmm(a.ends)}.`));
+  }
+  if (type === 'modified' && prev && prev.status === 'open' && a.status !== 'open' && /^esp-/.test(id)) {
+    const w = a.winner ? lg.teams[a.winner] : null, k = E.espOf(a.pid);
+    once(lg.code + ':espend:' + id, () => send(chat, w ? `${k === 'ley' ? '🏆✨' : '⭐'} <b>¡${esc(x.p.name)} ya tiene dueño!</b> ${who(lg, w.idx)} se lo lleva por <b>${fmtM(a.price)}</b>. El resto, a llorar al muro 😏` : `🤷 Nadie se ha llevado a <b>${esc(x.p.name)}</b>. Volverá a salir otra vez.`));
+    return;
   }
   if (type === 'modified' && prev && prev.status === 'open' && a.status !== 'open' && sHum) {
     const w = a.winner ? lg.teams[a.winner] : null;
@@ -587,7 +614,8 @@ function packNews(lg, id, x) {
   if (!(x.tipo === 'oro' || (best && best.o >= 84))) return;
   once(lg.code + ':pack:' + id, () => {
     const desc = (x.premios || []).map(p => p.k === 'jugador' ? `${p.tag === 'crack' ? '💎' : '⭐'} <b>${esc(E.player(p.pid).name)}</b> (${p.o})` : p.k === 'dinero' ? `💰 ${fmtM(p.v)}` : p.k === 'tokens' ? `💎 ${p.v} tokens` : '🎟️ bono').join(' · ');
-    const crack = ps.find(p => p.tag === 'crack');
+    const crack = ps.find(p => p.tag === 'crack'), espP = (x.premios || []).find(p => p.k === 'jugador' && E.espOf(p.pid));
+    if (espP) { const k = E.espOf(espP.pid); send(chat, `${k === 'ley' ? '🚨🏆 ¡¡UNA LEYENDA EN UN SOBRE!!' : '🚨⭐ ¡HÉROE EN UN SOBRE!'} ${who(lg, t.idx)} abre un sobre de oro y le sale <b>${esc(E.player(espP.pid).name)}</b> (${E.player(espP.pid).base}).`); queueNews(chat, async () => ({ kind: 'carta', caption: '🎁 ' + E.player(espP.pid).name + ' sale en un sobre', data: { k, tag: 'SOBRE DE ORO', title: `¡<em>${esc(E.player(espP.pid).name.split(' ').slice(-1)[0])}</em> en un sobre!`, sub: 'Para ' + teamsArr(lg)[t.idx].name, cards: [espCardData(espP.pid)] } }), 15000); return; }
     send(chat, `${crack ? '🚨💎 ¡¡CRACK EN UN SOBRE!!' : '🎁'} ${who(lg, t.idx)} abre un <b>${PACK_N[x.tipo] || 'sobre'}</b>: ${desc}`);
     if (crack && !crack.sold) queueNews(chat, () => NEWS.fichaje(lg, t.idx, E.player(crack.pid).name, E.pval(crack.pid, lg.cfg.season, 0), 'Sobre de oro'), 20000);
   });
@@ -657,6 +685,7 @@ await tg('setMyCommands', { commands: [{ command: 'vincular', description: 'Vinc
 for (const code in ST.leagues) watch(code);
 setTimeout(() => { for (const code in ST.leagues) announcePacks(code); }, 30000);
 setTimeout(() => { for (const code in ST.leagues) announceRuleta(code); }, 150000);
+setTimeout(() => { for (const code in ST.leagues) announceEsp(code); }, 300000);
 setInterval(tick, 30000); setTimeout(tick, 5000);
 poll();
 console.log('Bot en marcha');

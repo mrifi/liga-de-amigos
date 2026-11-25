@@ -72,6 +72,13 @@
     const p = { id: 'r' + i, name, pos, by: +by, base: +o, nat, real: true, s0: 1 };
     P[p.id] = p; REAL.push(p);
   });
+  // cartas especiales (leyendas y héroes): edad fija de 28 años, no envejecen ni bajan de media
+  const ESP = { ley: [], her: [] };
+  (G.ESP_RAW || '').trim().split('\n').filter(Boolean).forEach(l => {
+    const [t, id, name, pos, o, nat, fig] = l.split(';');
+    P[id] = { id, name, pos, by: BASE_YEAR - 28, base: +o, nat, real: true, s0: 1, esp: t, fig, fixAge: 28 }; ESP[t].push(id);
+  });
+  const espOf = id => (P[id] && P[id].esp) || null;
   function genPlayer(id) {
     const r = rng('gen' + id), N = G.GEN_NAMES, parts = id.split('-');
     let pos, by, base, s0 = 1;
@@ -82,9 +89,10 @@
     P[id] = p; return p;
   }
   const player = id => P[id] || genPlayer(id);
-  const age = (p, S) => BASE_YEAR + S - 1 - p.by;
+  const age = (p, S) => p.fixAge || BASE_YEAR + S - 1 - p.by;
   function pot(p) { const a0 = BASE_YEAR + p.s0 - 1 - p.by; return Math.min(95, p.base + Math.max(0, 26 - a0) * 2.2 + 2 + (p.young ? 4 : 0)); }
   function ageDelta(p, S) {
+    if (p.esp) return 0;
     let d = 0;
     for (let s = p.s0; s < S; s++) { const a = BASE_YEAR + s - 1 - p.by; d += a < 21 ? 2.5 : a < 24 ? 1.5 : a < 28 ? .5 : a < 31 ? 0 : a < 33 ? -1.5 : -2.5; }
     return d;
@@ -640,5 +648,5 @@
     return Object.values(row).sort((x, y) => y.pts - x.pts || (y.gf - y.gc) - (x.gf - x.gc) || y.gf - x.gf || group.indexOf(x.t) - group.indexOf(y.t));
   }
   const cupWinner = (doc, k) => { const x = doc.m[k], p = doc.pens[k]; return x.hg > x.ag || (p && p[0] > p[1]) ? x.h : x.a; };
-  G.ENG = { clDraw, drawTime, cupMeetRound, DRAW_SHOW: 4 * 60000, SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
+  G.ENG = { ESP, espOf, clDraw, drawTime, cupMeetRound, DRAW_SHOW: 4 * 60000, SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
 })(typeof window !== 'undefined' ? window : globalThis);
