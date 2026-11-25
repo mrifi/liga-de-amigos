@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import crypto from 'node:crypto';
 import { initializeApp } from 'firebase/app';
+import { createNews, render as renderNews, setKey as setAIKey, testKey } from './news/news.mjs';
 import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, collection, onSnapshot } from 'firebase/firestore';
 
@@ -37,6 +38,25 @@ const tg = async (method, body) => {
 };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+async function sendPhoto(chat, buf, caption) {
+  try {
+    const fd = new FormData(); fd.append('chat_id', String(chat)); fd.append('photo', new Blob([buf], { type: 'image/jpeg' }), 'noticia.jpg');
+    if (caption) { fd.append('caption', caption); fd.append('parse_mode', 'HTML'); }
+    let r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`, { method: 'POST', body: fd }), j = await r.json();
+    if (!j.ok && j.parameters?.retry_after) { await new Promise(z => setTimeout(z, (j.parameters.retry_after + 1) * 1000)); r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendPhoto`, { method: 'POST', body: fd }); j = await r.json(); }
+    if (!j.ok) console.warn('sendPhoto', j.description); return j;
+  } catch (e) { console.warn('sendPhoto', e.message); return {}; }
+}
+const nq = {}; // cola de noticias por chat: una imagen cada ~50 s como mínimo
+function queueNews(chat, maker, delay = 0) {
+  const prev = nq[chat] || Promise.resolve();
+  nq[chat] = prev.then(async () => {
+    if (delay) await new Promise(z => setTimeout(z, delay));
+    try { const n = await maker(); if (!n) return; const buf = await renderNews(n.kind, n.data); await sendPhoto(chat, buf, esc(n.caption)); }
+    catch (e) { console.warn('noticia', e.message); }
+    await new Promise(z => setTimeout(z, 50000));
+  });
+}
 const send = (chat, html) => tg('sendMessage', { chat_id: chat, text: html, parse_mode: 'HTML', disable_web_page_preview: true });
 const hhmm = t => new Date(t).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', timeZone: TZ });
 const dayName = t => new Date(t).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short', timeZone: TZ });
@@ -81,11 +101,12 @@ function watch(code) {
     if (ch.type === 'modified') {
       const o = dec(ch.doc.data()); if (!o || o.status !== 'no' || o.ai) return;
       const fi = lg.teams[o.from]?.idx, ti = lg.teams[o.to]?.idx; if (fi == null || ti == null || !isHuman(lg, fi) || !isHuman(lg, ti)) return;
-      return once(code + ':ofno:' + ch.doc.id, () => send(chatOf(code), fill(pick(T.REJECT), { t: who(lg, ti), f: who(lg, fi), p: esc(E.player(o.pid).name), x: fmtM(o.price) })));
+      return once(code + ':ofno:' + ch.doc.id, () => { send(chatOf(code), fill(pick(T.REJECT), { t: who(lg, ti), f: who(lg, fi), p: esc(E.player(o.pid).name), x: fmtM(o.price) })); if (Math.random() < .6) queueNews(chatOf(code), () => NEWS.ultimaHora(lg, { facts: { tipo: 'oferta rechazada', rechaza: who2(lg, ti), ofertante: who2(lg, fi), jugador: E.player(o.pid).name, cifra: fmtM(o.price) }, fb: { titular: `${idxName(lg, ti)} rechaza ${fmtM(o.price)} por ${E.player(o.pid).name}`, sub: `«No está en venta», responde el club. ${idxName(lg, fi)} no se rinde.`, ticker: 'Tensión máxima en el mercado de la Liga de Amigos' } })); });
     }
     if (ch.type !== 'added') return; const o = dec(ch.doc.data()); if (!o || o.status !== 'pend' || !o.t || o.t < lg.boot - 60000) return;
     const to = lg.teams[o.to]; if (!to || !to.owner) return;
     const from = lg.teams[o.from], pl = E.player(o.pid);
+    if (!o.ai && from && from.owner && Math.random() < .7) once(code + ':ofimg:' + ch.doc.id, () => queueNews(chatOf(code), () => NEWS.bombazo(lg, { tipo: 'oferta', from: from.idx, to: to.idx, pid: o.pid, price: o.price }), 3000));
     once(code + ':of:' + ch.doc.id, () => send(chatOf(code), `💰 <b>${esc(from?.name || 'Un club')}</b>${o.ai ? ' (IA)' : ''} ofrece <b>${fmtM(o.price)}</b> por ${esc(pl.name)} del <b>${esc(to.name)}</b>. ${o.exp ? 'Caduca a las ' + hhmm(o.exp) + '.' : ''}`));
   }));
 }
@@ -139,10 +160,11 @@ function tick() {
         send(chat, `${label[ev.k]} <b>${esc(ev.name)}</b> a las ${hhmm(ev.at)} (en 10 min)\n${ps.join('\n')}${ps.length ? '\n' : ''}\nVedlo en directo: quien esté conectado juega con <b>+8% de posesión</b>.\n${SITE}`);
       });
       if (dt <= 0 && dt > -90000) once(code + ':ko:' + ev.k + ev.id, () => send(chat, `🔴 ¡Empieza ${esc(ev.name)}! ${SITE}`));
-      if (ev.k === 'jor' && dt <= 3 * 3600000 && dt > 20 * 60000) { const pv = previa(lg, ev); if (pv) once(code + ':pv:' + ev.id, () => send(chat, pv)); }
+      if (ev.k === 'jor' && dt <= 3 * 3600000 && dt > 20 * 60000) { const pv = previa(lg, ev); if (pv) once(code + ':pv:' + ev.id, () => { send(chat, pv); derbyPairs(lg, ev).forEach(([h, a]) => queueNews(chat, () => NEWS.caraacara(lg, ev, h, a), 20000)); }); }
     }
     drawTick(lg, chat, now);
     const [dk, hr] = madrid(now); if (hr >= 10 && hr < 12) once(code + ':dig:' + dk, () => send(chat, digest(lg)));
+    if (hr >= 13 && hr < 16 && (ST.newsDay?.[code] || 0) < now - 20 * 3600000) once(code + ':news:' + dk, () => { ST.newsDay = { ...(ST.newsDay || {}), [code]: now }; save(); queueNews(chat, () => dailyNews(lg), Math.floor(Math.random() * 40) * 60000); });
   }
 }
 
@@ -166,6 +188,7 @@ function onFinal(lg, k, id, d) {
     }
     send(chat, txt);
     setTimeout(() => { const b = pique(lg, k, d); if (b.length) send(chat, '🎙️ <b>El vestuario opina</b>\n\n' + b.join('\n\n')); }, 15000);
+    newsAfter(lg, chat, k, id, d);
   });
 }
 
@@ -337,9 +360,11 @@ function ledgerNews(lg) {
     if (!chat) continue;
     for (const e of fresh) {
       const [kind, ...rest] = String(e.why || '').split(': '), o = { t: who(lg, i), p: esc(rest.join(': ')), x: fmtM(Math.abs(e.amt)) };
-      if (kind === 'Fichaje') send(chat, fill(pick(T.BUY), o) + (Math.abs(e.amt) >= 20 ? pick(T.BUY_BIG) : ''));
-      else if (kind === 'Subasta') send(chat, fill(pick(T.AUC), o));
-      else if (kind === 'Venta') send(chat, fill(pick(T.SELL), o));
+      if (kind === 'Fichaje' || kind === 'Subasta') {
+        if (Math.abs(e.amt) >= 3) queueNews(chat, () => NEWS.fichaje(lg, i, rest.join(': '), e.amt, kind === 'Subasta' ? 'Subasta ganada' : 'Traspaso'), 5000);
+        else send(chat, fill(pick(kind === 'Fichaje' ? T.BUY : T.AUC), o));
+      }
+      else if (kind === 'Venta') { send(chat, fill(pick(T.SELL), o)); if (Math.abs(e.amt) >= 8) queueNews(chat, () => NEWS.ultimaHora(lg, { facts: { tipo: 'venta', vendedor: who2(lg, i), jugador: rest.join(': '), precio: fmtM(Math.abs(e.amt)) }, fb: { titular: `${t.name} vende a ${rest.join(': ')}`, sub: `Operación cerrada por ${fmtM(Math.abs(e.amt))}. La afición, dividida.`, ticker: 'El mercado se mueve en la Liga de Amigos' } })); }
       else if (kind === 'Liberado') send(chat, fill(pick(T.REL), o));
       else if (kind === 'Obras') send(chat, fill(pick(T.BUILD), { ...o, x: esc(rest.join(': ')) }));
     }
@@ -427,6 +452,59 @@ function drawTick(lg, chat, now) {
   }
 }
 
+
+/* ---------- noticias en imagen ---------- */
+const who2 = (lg, i) => `${idxName(lg, i)}${mgr(lg, i) ? ' (' + mgr(lg, i) + ')' : ''}`;
+const NEWS = createNews({ E, teamsArr, idxName, isHuman, nick, mgr, seasonDocs, tableOf, streak, h2h, scorers, humansIdx });
+function derbyPairs(lg, ev) { const fx = E.fixtures(lg.cfg.n, lg.cfg.seed + ':' + lg.cfg.season)[ev.md - 1] || []; return fx.filter(([h, a]) => isHuman(lg, h) && isHuman(lg, a)); }
+function newsAfter(lg, chat, k, id, d) {
+  if (!humansIdx(lg).length || !NEWS.mainStory(lg, d)) return;
+  if (k === 'jor') {
+    queueNews(chat, () => NEWS.portada(lg, d), 60000);
+    const md = d.md, opts = [];
+    const late = d.m.some(m => (isHuman(lg, m.h) || isHuman(lg, m.a)) && (m.ev || []).some(e => e.t === 'gol' && e.m >= 80 && [m.hg, m.ag][e.s] >= [m.hg, m.ag][1 - e.s]));
+    if (late) opts.push({ p: 9, f: () => NEWS.radio(lg, d) });
+    opts.push({ p: 5 + Math.random() * 4, f: () => NEWS.notas(lg, d) });
+    opts.push({ p: 4 + Math.random() * 4, f: () => NEWS.chat(lg, d) });
+    opts.push({ p: 6 + Math.random() * 3, f: () => NEWS.comunicado(lg, d) });
+    if (md >= 3) opts.push({ p: 3 + Math.random() * 5, f: () => NEWS.expectativa(lg, d) });
+    opts.push({ p: 2 + Math.random() * 5, f: () => NEWS.onceIdeal(lg, d) });
+    if (md % 3 === 0) opts.push({ p: 7, f: () => NEWS.clasificacion(lg, md) });
+    if (md % 4 === 2) opts.push({ p: 6, f: () => NEWS.tierlist(lg, md) });
+    // se prueban por prioridad; salen como mucho 2 extra (los que no aplican devuelven null)
+    const order = opts.sort((a, b) => b.p - a.p);
+    let sent = 0;
+    queueNews(chat, async () => { for (const o of order) { if (sent >= 2) break; const n = await o.f(); if (n) { sent++; const buf = await renderNews(n.kind, n.data); await sendPhoto(chat, buf, esc(n.caption)); if (sent < 2) await sleep(60000); } } return null; }, 30000);
+  } else {
+    const R = k === 'cup' ? E.cupBracket(lg.cfg.n, lg.cfg.seed + ':' + lg.cfg.season).rounds : 4, r = +String(id).split('-r')[1], final = r === R - 1;
+    const comp = k === 'cup' ? (final ? 'Final de Copa' : 'Copa') : (final ? 'Final de la Champions' : 'Champions');
+    if (final) queueNews(chat, () => NEWS.portada(lg, d, { comp }), 60000);
+    else if (Math.random() < .35) queueNews(chat, () => NEWS.radio(lg, { ...d, md: comp }), 60000);
+  }
+}
+async function dailyNews(lg) {
+  const md = seasonDocs(lg).length, H = humansIdx(lg); if (!H.length) return null;
+  const opts = [() => NEWS.encuesta(lg)];
+  // rumor: un equipo de amigos se interesa por una estrella de otro equipo
+  opts.push(() => { const from = pick(H), pool = []; teamsArr(lg).forEach((t, i) => { if (i === from || !t) return; (t.squad || []).forEach(pid => { const o = E.ovr(pid, lg.cfg.season, t.xp?.[pid] || 0); if (o >= 80) pool.push({ pid, i, o, v: E.pval(pid, lg.cfg.season, t.xp?.[pid] || 0) }); }); });
+    if (!pool.length) return null; const x = pick(pool.sort((a, b) => b.o - a.o).slice(0, 12)); return NEWS.bombazo(lg, { tipo: 'rumor', from, to: x.i, pid: x.pid, price: Math.round(x.v * (1 + Math.random() * .5) * 10) / 10 }); });
+  if (md >= 2) opts.push(() => NEWS.tierlist(lg, md), () => NEWS.clasificacion(lg, md));
+  for (let tries = 0; tries < 4; tries++) { const n = await pick(opts)(); if (n) return n; }
+  return null;
+}
+async function setGroqKey(msg, raw) {
+  const chat = msg.chat.id, from = msg.from?.id;
+  if (msg.chat.type !== 'private') { tg('deleteMessage', { chat_id: chat, message_id: msg.message_id }); return send(chat, '🔐 La clave se manda por privado al bot, no en el grupo. He intentado borrar tu mensaje; por si acaso, crea una clave nueva en Groq.'); }
+  tg('deleteMessage', { chat_id: chat, message_id: msg.message_id });
+  if (ST.groqOwner && ST.groqOwner !== from) return send(chat, 'Solo quien configuró la clave la puede cambiar.');
+  if (raw === 'borrar') { ST.groq = null; save(); setAIKey(null); return send(chat, 'Clave borrada. Las noticias usarán textos de reserva.'); }
+  if (!raw || !/^gsk_[A-Za-z0-9]{20,}$/.test(raw)) return send(chat, 'Mándamela así: <code>/clave gsk_...</code> (la clave de console.groq.com).');
+  const ok = await testKey(raw);
+  if (ok === false) return send(chat, '❌ Groq dice que esa clave no es válida. Revisa que la has copiado entera.');
+  ST.groq = raw; ST.groqOwner = from; save(); setAIKey(raw);
+  send(chat, `✅ Clave guardada${ok ? ' y comprobada' : ''}. He borrado tu mensaje. Ya escribo las noticias con IA.\nPrueba <code>/noticia</code> en el grupo.`);
+}
+
 /* ---------- comandos ---------- */
 async function link(chat, raw) {
   const code = String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
@@ -435,13 +513,14 @@ async function link(chat, raw) {
   if (!s || !s.exists()) return send(chat, `No encuentro ninguna liga con el código ${esc(code)}.`);
   await setDoc(doc(db, 'ligas/' + code + '/miembros/' + auth.currentUser.uid), { name: 'Bot de Telegram', bot: true }, { merge: true });
   ST.leagues[code] = { chat }; save(); watch(code);
-  send(chat, `✅ Vinculado a <b>${esc(s.data().name || 'Liga de Amigos')}</b> (${code}).\nAvisaré 10 minutos antes de cada partido, al empezar, con los resultados y la clasificación, las ofertas por vuestros jugadores y lo que escribáis en el muro.\n\nY como buen vestuario: piques tras cada jornada, previa de los derbis y noticias cada mañana.\n\nComandos: /proximos /tabla /pique /noticias /desvincular`);
+  send(chat, `✅ Vinculado a <b>${esc(s.data().name || 'Liga de Amigos')}</b> (${code}).\nAvisaré 10 minutos antes de cada partido, al empezar, con los resultados y la clasificación, las ofertas por vuestros jugadores y lo que escribáis en el muro.\n\nY como buen vestuario: piques tras cada jornada, previa de los derbis y noticias cada mañana.\n\nComandos: /proximos /tabla /pique /noticias /noticia /desvincular`);
 }
 async function cmd(msg) {
   const chat = msg.chat.id, t = (msg.text || '').trim(), [c0, ...rest] = t.split(/\s+/), c = c0.split('@')[0].toLowerCase();
   const code = Object.keys(ST.leagues).find(k => ST.leagues[k].chat === chat), lg = code && L[code];
   if (c === '/start' || c === '/ayuda' || c === '/help') return send(chat, `👋 Soy el bot de <b>Liga de Amigos</b>.\nMeted el bot en vuestro grupo y escribid <code>/vincular CODIGO</code> con el código de 6 letras de la liga (Club → Mi club).\n\n${SITE}`);
   if (c === '/vincular') return link(chat, rest[0]);
+  if (c === '/clave') return setGroqKey(msg, rest[0]);
   if (c === '/desvincular') { if (code) { delete ST.leagues[code]; save(); } return send(chat, 'Hecho, ya no enviaré avisos aquí.'); }
   if (!lg || !lg.cfg) return c.startsWith('/') ? send(chat, 'Este chat no está vinculado a ninguna liga. Usa /vincular CODIGO.') : null;
   if (c === '/proximos') {
@@ -450,6 +529,7 @@ async function cmd(msg) {
   }
   if (c === '/noticias') return send(chat, digest(lg));
   if (c === '/pique') return send(chat, piqueNow(lg));
+  if (c === '/noticia') { const now = Date.now(); if (lg.lastAsk && now - lg.lastAsk < 5 * 60000) return send(chat, '⏳ La redacción está escribiendo… espera unos minutos entre noticias.'); lg.lastAsk = now; send(chat, '🗞️ Marchando una noticia…'); return queueNews(chat, () => dailyNews(lg)); }
   if (c === '/tabla') {
     const docs = Object.values(lg.jor).filter(x => x.season === lg.cfg.season && x.fin), tb = E.table(lg.cfg.n, docs);
     return send(chat, '<b>Clasificación</b>\n' + tb.map((r, i) => `${i + 1}. ${isHuman(lg, r.t) ? '<b>' : ''}${esc(idxName(lg, r.t))} · ${r.pts} pts${isHuman(lg, r.t) ? '</b>' : ''}`).join('\n'));
@@ -464,7 +544,8 @@ async function poll() {
 }
 
 await login();
-await tg('setMyCommands', { commands: [{ command: 'vincular', description: 'Vincular este chat a una liga (código de 6 letras)' }, { command: 'proximos', description: 'Próximos partidos' }, { command: 'tabla', description: 'Clasificación' }, { command: 'pique', description: 'Que el bot pique al grupo' }, { command: 'noticias', description: 'Noticias de la liga' }, { command: 'desvincular', description: 'Dejar de recibir avisos aquí' }] });
+if (ST.groq) setAIKey(ST.groq);
+await tg('setMyCommands', { commands: [{ command: 'vincular', description: 'Vincular este chat a una liga (código de 6 letras)' }, { command: 'proximos', description: 'Próximos partidos' }, { command: 'tabla', description: 'Clasificación' }, { command: 'pique', description: 'Que el bot pique al grupo' }, { command: 'noticias', description: 'Noticias de la liga' }, { command: 'noticia', description: 'Una noticia en imagen de la prensa de la liga' }, { command: 'desvincular', description: 'Dejar de recibir avisos aquí' }] });
 for (const code in ST.leagues) watch(code);
 setInterval(tick, 30000); setTimeout(tick, 5000);
 poll();
