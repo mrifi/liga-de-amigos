@@ -1416,6 +1416,27 @@ function liveOpts(col, id, doc, k) {
   };
   return { live, liveNote: note, after: v => { v.key = { col, id, k }; v.sig = null; v.liveMine = !!(live && mine); if (live && mine) presT = 0; } };
 }
+/* Palco VIP 3D: va en un iframe aparte (palco/). Si no carga o falla, se cierra solo y sigue la vista normal. */
+let PALCO = null;
+function closePalco(msg) { if (!PALCO) return; clearTimeout(PALCO.to); removeEventListener('message', PALCO.on); PALCO.el.remove(); PALCO = null; if (msg) toast(msg); VW && VW.el && VW.el.querySelector('.mvx')?.focus(); }
+function openPalco(opts, r) {
+  if (PALCO || !opts.match) return;
+  const team = t => ({ name: (t && t.name) || 'Equipo', short: (t && (t.short || (t.name || '').slice(0, 3).toUpperCase())) || 'EQU', colors: (t && t.colors) || ['#1f9d55', '#f2f5ee'] });
+  const el = document.createElement('div'); el.className = 'palco-ov'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Palco VIP 3D');
+  el.innerHTML = '<iframe src="palco/index.html?embed=1" title="Palco VIP 3D" allow="autoplay; fullscreen"></iframe><button class="palco-x" aria-label="Cerrar palco">' + IC.x + '</button>';
+  document.body.appendChild(el);
+  const fr = el.querySelector('iframe');
+  const on = e => {
+    if (e.origin !== location.origin || e.source !== fr.contentWindow || !e.data) return;
+    const t = e.data.type;
+    if (t === 'palco-ready') { clearTimeout(PALCO.to); PALCO.ready = true; fr.contentWindow.postMessage({ type: 'palco-match', m: (VW && VW.curM) || opts.match, H: team(opts.H), A: team(opts.A), live: opts.live && Date.now() < opts.live.at + LIVE ? opts.live.at : 0, startR: opts.live || !(r > 20) ? 0 : r }, location.origin); }
+    else if (t === 'palco-close') closePalco();
+    else if (t === 'palco-error') closePalco('El palco no ha podido cargar. Sigues en la vista normal.');
+  };
+  PALCO = { el, on, to: setTimeout(() => closePalco('El palco tarda demasiado en cargar. Sigues en la vista normal.'), 45000) };
+  addEventListener('message', on);
+  el.querySelector('.palco-x').addEventListener('click', () => closePalco());
+}
 function openViewer(opts) {
   opener = document.activeElement; closeViewer(true);
   const ov = document.createElement('div'); ov.className = 'mvov'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true');
@@ -1423,10 +1444,11 @@ function openViewer(opts) {
   document.body.appendChild(ov); document.body.style.overflow = 'hidden';
   ov.querySelector('.mvx').addEventListener('click', closeViewer);
   const stad = opts.H ? E.stLvl(opts.H) : 3, f0 = opts.match && opts.match.fin && opts.match.fin[0], fill = f0 && f0.att ? f0.att / E.STADIUM[stad].cap : .6;
-  VW = window.MV.mount(ov.querySelector('.mvroot'), { stad, fill, ...opts, crest, esc, league: S.cfg.name }); VW.el = ov; if (opts.after) opts.after(VW);
+  const onPalco = !(S.flags && S.flags.palco === false) && opts.match && window.postMessage ? r => openPalco(opts, r) : null;
+  VW = window.MV.mount(ov.querySelector('.mvroot'), { stad, fill, ...opts, crest, esc, league: S.cfg.name, onPalco }); VW.el = ov; if (opts.after) opts.after(VW);
   ov.addEventListener('keydown', e => trapTab(e, ov)); ov.querySelector('.mvx').focus();
 }
-function closeViewer(silent) { if (!VW) return; VW.destroy(); VW.el.remove(); VW = null; document.body.style.overflow = ''; if (silent === true) return; render(); const back = opener && opener.id ? document.getElementById(opener.id) : null; (back || document.querySelector('nav.tabs [aria-current=true]'))?.focus(); }
+function closeViewer(silent) { closePalco(); if (!VW) return; VW.destroy(); VW.el.remove(); VW = null; document.body.style.overflow = ''; if (silent === true) return; render(); const back = opener && opener.id ? document.getElementById(opener.id) : null; (back || document.querySelector('nav.tabs [aria-current=true]'))?.focus(); }
 /* ---------- acciones de mercado ---------- */
 async function lockPlayer(pid) { const l = await S.db.doc('bloqueos/p-' + pid).acquire({ holder: S.me, ttlMs: 10000 }); return l.acquired; }
 const ledgerAdd = (t, amt, why) => capLog([...(t.ledger || []), { d: Date.now(), amt: E.r1(amt), why }], 150, 'amt');
@@ -1576,7 +1598,7 @@ function refreshViewer() {
   if (!VW || !VW.key || !D) return; const { col, id, k } = VW.key;
   const doc = col === 'jor' ? D.all.find(d => 's' + d.season + '-m' + d.md === id) : col === 'cup' ? S.cup[id] : S.cl[id]; if (!doc || !doc.m[k]) return;
   const m = doc.m[k], sig = m.ev.length + ':' + m.hg + m.ag + ':' + (m.part ?? 'f') + ':' + E.hash(JSON.stringify(m.ev));
-  if (sig !== VW.sig) { VW.sig = sig; VW.update(m); }
+  if (sig !== VW.sig) { VW.sig = sig; VW.update(m); VW.curM = m; if (PALCO && PALCO.ready) try { PALCO.el.querySelector('iframe').contentWindow.postMessage({ type: 'palco-update', m }, location.origin); } catch (e) { } }
 }
 async function loadNames() {
   if (!S.user || !D) return;
@@ -1619,6 +1641,8 @@ setInterval(tick, 20000);
   db.collection('noticias').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.t) o[d.id] = x; }); S.noticias = o; changed(); }, e => console.warn(e));
   db.collection('muro').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.txt) o[d.id] = x; }); S.muro = o; changed(); }, e => console.warn(e));
   db.collection('champions').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.m) o[d.id] = x; }); S.clRaw = o; changed(); }, e => console.warn(e));
+  // interruptor de funciones nuevas: ligas/<código>/ajustes/flags → { palco: false } lo apaga al momento
+  try { db.doc('ajustes/flags').onSnapshot(x => { S.flags = (x && x.exists && x.data && x.data()) || {}; }, e => console.warn(e)); } catch (e) { console.warn(e); }
   db.collection('sorteos').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.groups) o[d.id] = x; }); S.sorteos = o; if (D) D._cls = D._clst = null; changed(); }, e => console.warn(e));
   db.collection('copa').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.m) o[d.id] = x; }); S.cupRaw = o; changed(); }, e => console.warn(e));
   db.collection('vivo').onSnapshot(q => { const o = {}; q.docs.forEach(d => { const x = d.data(); if (x && x.sl) o[d.id] = x; }); S.vivo = o; changed(); }, e => console.warn(e));

@@ -1119,7 +1119,7 @@
     root.innerHTML = `<div class="mv">
       <div class="mv-top"><div class="mv-t">${o.crest(o.H, 36)}<b>${esc(o.H.short)}</b></div><div class="mv-sc"><span class="mv-score">0-0</span><span class="mv-clk">0'</span></div><div class="mv-t r"><b>${esc(o.A.short)}</b>${o.crest(o.A, 36)}</div></div>
       <div class="mv-stage"><div class="mv-r2"></div><div class="mv-r3"></div><div class="mv-flash"></div><div class="mv-ban" aria-live="polite"></div><div class="mv-load" style="display:none">Cargando estadio 3D…</div>
-        <div class="mv-tools"><div class="seg"><button data-v="2d">2D</button><button data-v="3d">3D</button></div><div class="seg mv-cams"><button data-c="tv">TV</button><button data-c="aerea">Aérea</button><button data-c="jug">Cerca</button></div></div>
+        <div class="mv-tools"><div class="seg"><button data-v="2d">2D</button><button data-v="3d">3D</button>${o.onPalco ? '<button data-pal="1" class="mv-pal">Palco</button>' : ''}</div><div class="seg mv-cams"><button data-c="tv">TV</button><button data-c="aerea">Aérea</button><button data-c="jug">Cerca</button></div></div>
         <div class="mv-comm"></div><div class="mv-end" hidden></div></div>
       <div class="mv-ctrl"></div>
       <div class="mv-tabs">${MG ? '<button data-tab="ges" aria-pressed="true">Gestión</button>' : ''}<button data-tab="nar" aria-pressed="${!MG}">Relato</button><button data-tab="est">Datos</button><button data-tab="ali">Equipos</button></div>
@@ -1150,6 +1150,7 @@
     root.addEventListener('change', keepDraft); root.addEventListener('input', keepDraft);
     root.addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b || !root.contains(b)) return;
+      if (b.dataset.pal && o.onPalco) { try { o.onPalco(r); } catch (err) { console.warn(err); } return; }
       if (b.dataset.v) setView(b.dataset.v);
       if (b.dataset.c && r3) { r3.setCam(b.dataset.c); root.querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', x === b)); snap = true; }
       if (b.dataset.sp) { speed = +b.dataset.sp; high = false; paused = false; el.ctrl.innerHTML = ctrlHTML(); }
