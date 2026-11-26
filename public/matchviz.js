@@ -546,7 +546,7 @@
           else if (c === q) T = ball.dead ? { x: q.x, y: q.y, v: .1 } : carryTarget(q, t);
           else if (chase[p.s] === q) T = { x: bx, y: by, v: 7.5 };
           else {
-            const b = shapeTarget(p, t, bx, by, possS); T = { x: b.x, y: b.y, v: hyp(q.x, q.y, b.x, b.y) > 10 ? 6.5 : 5.2 };
+            const b = shapeTarget(p, t, bx, by, possS), db = hyp(q.x, q.y, bx, by), far = hyp(q.x, q.y, b.x, b.y); T = { x: b.x, y: b.y, v: far > 12 ? 6.2 : db > 38 ? 2.4 : db > 26 ? 3.4 : db > 15 ? 4.5 : 5.4 };
             if (c && !ball.dead && p.s !== c.p.s) {
               if (q === pr1) T = { x: c.x - dirOf(p.s, t) * .8, y: c.y, v: t < prot[c.p.s] ? 6.2 : 7.2 };
               else if (q === pr2) { const gx = X(p.s, t, 0), L = hyp(gx, 34, c.x, c.y) || 1; T = { x: c.x + (gx - c.x) / L * 6, y: c.y + (34 - c.y) / L * 6, v: 6.2 }; }
@@ -1316,5 +1316,5 @@
     return { update(nm2) { m = nm2; tl = build(m); mot = Motion(tl, mot.st); curBan = null; lastPanel = -1; prevR = r; }, destroy() { dead = true; cancelAnimationFrame(raf); SND.quiet(); r2 && r2.destroy(); r3 && r3.destroy(); root.innerHTML = ''; }, get r() { return r; } };
   }
 
-  G.MV = { build, sample, mount, LIVE_S, minuteAt };
+  G.MV = { build, sample, mount, LIVE_S, minuteAt, Motion };
 })(window);
