@@ -20,7 +20,17 @@
     '4-2-3-1': ['POR', 'LD', 'DFC', 'DFC', 'LI', 'MCD', 'MCD', 'ED', 'MCO', 'EI', 'DC'],
     '4-1-4-1': ['POR', 'LD', 'DFC', 'DFC', 'LI', 'MCD', 'ED', 'MC', 'MC', 'EI', 'DC'],
     '3-5-2': ['POR', 'DFC', 'DFC', 'DFC', 'LD', 'MCD', 'MC', 'MC', 'LI', 'DC', 'DC'],
-    '5-3-2': ['POR', 'LD', 'DFC', 'DFC', 'DFC', 'LI', 'MC', 'MCD', 'MC', 'DC', 'DC']
+    '5-3-2': ['POR', 'LD', 'DFC', 'DFC', 'DFC', 'LI', 'MC', 'MCD', 'MC', 'DC', 'DC'],
+    '4-3-3 ofensivo': ['POR', 'LD', 'DFC', 'DFC', 'LI', 'MC', 'MCO', 'MC', 'ED', 'DC', 'EI'],
+    '4-4-2 rombo': ['POR', 'LD', 'DFC', 'DFC', 'LI', 'MCD', 'MC', 'MC', 'MCO', 'DC', 'DC'],
+    '4-2-2-2': ['POR', 'LD', 'DFC', 'DFC', 'LI', 'MCD', 'MCD', 'MCO', 'MCO', 'DC', 'DC'],
+    '4-5-1': ['POR', 'LD', 'DFC', 'DFC', 'LI', 'ED', 'MC', 'MCD', 'MC', 'EI', 'DC'],
+    '4-3-2-1': ['POR', 'LD', 'DFC', 'DFC', 'LI', 'MC', 'MCD', 'MC', 'MCO', 'MCO', 'DC'],
+    '4-2-4': ['POR', 'LD', 'DFC', 'DFC', 'LI', 'MC', 'MC', 'ED', 'DC', 'DC', 'EI'],
+    '3-4-3': ['POR', 'DFC', 'DFC', 'DFC', 'LD', 'MC', 'MC', 'LI', 'ED', 'DC', 'EI'],
+    '3-4-2-1': ['POR', 'DFC', 'DFC', 'DFC', 'LD', 'MC', 'MC', 'LI', 'MCO', 'MCO', 'DC'],
+    '3-4-1-2': ['POR', 'DFC', 'DFC', 'DFC', 'LD', 'MC', 'MC', 'LI', 'MCO', 'DC', 'DC'],
+    '5-4-1': ['POR', 'LD', 'DFC', 'DFC', 'DFC', 'LI', 'ED', 'MC', 'MC', 'EI', 'DC']
   };
   const BACK4 = [[50, 92], [86, 72], [62, 77], [38, 77], [14, 72]];
   const COORD = {
@@ -28,8 +38,43 @@
     '4-4-2': [...BACK4, [86, 45], [62, 50], [38, 50], [14, 45], [62, 18], [38, 18]],
     '4-2-3-1': [...BACK4, [64, 58], [36, 58], [84, 33], [50, 36], [16, 33], [50, 14]],
     '4-1-4-1': [...BACK4, [50, 60], [86, 40], [63, 44], [37, 44], [14, 40], [50, 15]],
-    '3-5-2': [[50, 92], [74, 76], [50, 79], [26, 76], [89, 47], [50, 59], [68, 44], [32, 44], [11, 47], [62, 18], [38, 18]],
-    '5-3-2': [[50, 92], [91, 64], [71, 76], [50, 79], [29, 76], [9, 64], [72, 46], [50, 55], [28, 46], [62, 18], [38, 18]]
+    '3-5-2': [[50, 93], [75, 77], [50, 75], [25, 77], [89, 47], [50, 59], [68, 44], [32, 44], [11, 47], [62, 18], [38, 18]],
+    '5-3-2': [[50, 93], [91, 64], [72, 76], [50, 74], [28, 76], [9, 64], [72, 46], [50, 55], [28, 46], [62, 18], [38, 18]],
+    '4-3-3 ofensivo': [...BACK4, [72, 52], [50, 38], [28, 52], [84, 22], [50, 14], [16, 22]],
+    '4-4-2 rombo': [...BACK4, [50, 62], [74, 48], [26, 48], [50, 34], [62, 16], [38, 16]],
+    '4-2-2-2': [...BACK4, [64, 59], [36, 59], [78, 35], [22, 35], [62, 16], [38, 16]],
+    '4-5-1': [...BACK4, [86, 38], [63, 44], [50, 61], [37, 44], [14, 38], [50, 15]],
+    '4-3-2-1': [...BACK4, [73, 54], [50, 61], [27, 54], [64, 32], [36, 32], [50, 14]],
+    '4-2-4': [...BACK4, [64, 54], [36, 54], [86, 25], [62, 15], [38, 15], [14, 25]],
+    '3-4-3': [[50, 93], [75, 77], [50, 75], [25, 77], [89, 48], [62, 53], [38, 53], [11, 48], [80, 23], [50, 15], [20, 23]],
+    '3-4-2-1': [[50, 93], [75, 77], [50, 75], [25, 77], [89, 50], [63, 56], [37, 56], [11, 50], [66, 32], [34, 32], [50, 14]],
+    '3-4-1-2': [[50, 93], [75, 77], [50, 75], [25, 77], [89, 50], [63, 56], [37, 56], [11, 50], [50, 35], [62, 16], [38, 16]],
+    '5-4-1': [[50, 93], [91, 62], [72, 76], [50, 74], [28, 76], [9, 62], [84, 40], [61, 48], [39, 48], [16, 40], [50, 16]]
+  };
+  // carácter de cada formación (ataque, medio, defensa): lo que gana en una línea lo pierde en otra
+  const FMOD = {
+    '4-3-3': [1, 1, 1], '4-4-2': [1, 1.01, 1], '4-2-3-1': [1.01, 1.01, 1], '4-1-4-1': [.97, 1, 1.03],
+    '3-5-2': [1.01, 1.04, .98], '5-3-2': [.98, 1, 1.06], '4-3-3 ofensivo': [1, 1, 1], '4-4-2 rombo': [1, 1, 1],
+    '4-2-2-2': [1.02, .99, 1], '4-5-1': [.95, 1.01, 1.04], '4-3-2-1': [1, 1, 1], '4-2-4': [1.05, .99, .97],
+    '3-4-3': [1.03, 1.01, .98], '3-4-2-1': [1, 1, 1.01], '3-4-1-2': [1.01, 1.01, 1], '5-4-1': [.96, 1, 1.07]
+  };
+  const FDESC = {
+    '4-3-3': 'Equilibrada. Necesita extremos rápidos.',
+    '4-4-2': 'Clásica: dos delanteros y bandas. El medio sufre contra tres centrocampistas.',
+    '4-2-3-1': 'Sólida con dos pivotes y un mediapunta que lo crea todo.',
+    '4-1-4-1': 'Prudente: el pivote protege y los extremos bajan a defender. Menos gol.',
+    '3-5-2': 'Domina el medio. Los carrileros dejan espacio atrás.',
+    '5-3-2': 'Muy defensiva con cinco atrás. Cuesta crear y marcar.',
+    '4-3-3 ofensivo': 'Mediapunta en lugar de pivote: más gol, menos protección.',
+    '4-4-2 rombo': 'Medio muy poblado y dos puntas. Sin extremos, las bandas quedan solas.',
+    '4-2-2-2': 'Dos mediapuntas y dos delanteros por dentro. Bandas para los laterales.',
+    '4-5-1': 'Para aguantar: cinco en el medio y un solo delantero.',
+    '4-3-2-1': 'El árbol de Navidad: el medio más fuerte de todas, pero poco ancho.',
+    '4-2-4': 'Todo al ataque: cuatro arriba. Si te pillan, sufres atrás.',
+    '3-4-3': 'Presión y ataque con tres arriba. Defensa expuesta.',
+    '3-4-2-1': 'Tres centrales y dos mediapuntas: medio fuerte, buena defensa.',
+    '3-4-1-2': 'Tres centrales, un enganche y dos puntas.',
+    '5-4-1': 'El autobús: la defensa más fuerte, casi sin ataque.'
   };
   // pesos de cada puesto en ataque, medio y defensa
   const W = { POR: [0, 0, 0], DFC: [0, .1, 1], LD: [.15, .2, .75], LI: [.15, .2, .75], MCD: [0, .8, .45], MC: [.25, 1, .2], MCO: [.6, .7, 0], ED: [.85, .3, .05], EI: [.85, .3, .05], DC: [1, .1, 0] };
@@ -212,8 +257,8 @@
       if (pos === 'POR') { g = e; return; } const w = W[pos];
       a += e * w[0]; wa += w[0]; m += e * w[1]; wm += w[1]; d += e * w[2]; wd += w[2];
     });
-    const f = (s, w, k) => w > 0 ? (s / w) * Math.pow(w / k, .2) : 30;
-    return { A: f(a, wa, K[0]), M: f(m, wm, K[1]), D: f(d, wd, K[2]), G: g };
+    const f = (s, w, k) => w > 0 ? (s / w) * Math.pow(w / k, .2) : 30, fm = FMOD[lin.form] || [1, 1, 1];
+    return { A: f(a, wa, K[0]) * fm[0], M: f(m, wm, K[1]) * fm[1], D: f(d, wd, K[2]) * fm[2], G: g };
   }
 
   /* ---------- simulación de un partido ---------- */
@@ -261,7 +306,8 @@
         if (LINE[x.pos] !== 'D') { prs += (a.fis * .5 + a.vel * .5) * e; np++; }
       }
       const f = (s, w, k) => w > 0 ? (s / w) * Math.pow(w / k, .2) : 25;
-      const R = { crea: f(crea, wc, K[1]), fin: f(fin, wf, K[0]), def: f(de, wd, K[2]), gk, velA: nA ? velA / nA : 40, velD: nD ? velD / nD : 40, prs: np ? prs / np : 40 };
+      const fm = FMOD[t.form] || [1, 1, 1];
+      const R = { crea: f(crea, wc, K[1]) * fm[1], fin: f(fin, wf, K[0]) * fm[0], def: f(de, wd, K[2]) * fm[2], gk, velA: nA ? velA / nA : 40, velD: nD ? velD / nD : 40, prs: np ? prs / np : 40 };
       const tc = t.tac;
       if (tc.ment === 'ofe') { R.fin *= 1.04; R.crea *= 1.03; R.def *= .95; }
       if (tc.ment === 'def') { R.fin *= .95; R.crea *= .97; R.def *= 1.05; }
@@ -648,5 +694,6 @@
     return Object.values(row).sort((x, y) => y.pts - x.pts || (y.gf - y.gc) - (x.gf - x.gc) || y.gf - x.gf || group.indexOf(x.t) - group.indexOf(y.t));
   }
   const cupWinner = (doc, k) => { const x = doc.m[k], p = doc.pens[k]; return x.hg > x.ag || (p && p[0] > p[1]) ? x.h : x.a; };
-  G.ENG = { ESP, espOf, clDraw, drawTime, cupMeetRound, DRAW_SHOW: 4 * 60000, SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
+  const formProfile = form => { const w = [0, 0, 0], fm = FMOD[form] || [1, 1, 1]; (FORMS[form] || []).forEach(p => W[p].forEach((v, i) => { w[i] += v; })); return w.map((v, i) => Math.pow(v / K[i], .2) * fm[i]); };
+  G.ENG = { ESP, espOf, FDESC, formProfile, clDraw, drawTime, cupMeetRound, DRAW_SHOW: 4 * 60000, SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
 })(typeof window !== 'undefined' ? window : globalThis);

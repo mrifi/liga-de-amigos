@@ -1221,7 +1221,7 @@
           <div class="mv-grid"><label>Mentalidad<select data-g="ment">${opt({ def: 'Defensiva', equ: 'Equilibrada', ofe: 'Ofensiva' }, tv('ment'))}</select></label>
           <label>Presión<select data-g="press">${opt({ baj: 'Baja', med: 'Media', alt: 'Alta' }, tv('press'))}</select></label>
           <label>Estilo<select data-g="est">${opt({ pos: 'Posesión', mix: 'Mixto', dir: 'Directo', con: 'Contraataque' }, tv('est'))}</select></label>
-          <label>Formación<select data-g="form">${Object.keys(E.FORMS).map(f => `<option ${f === fv ? 'selected' : ''}>${f}</option>`).join('')}</select></label></div>
+          <label>Formación<select data-g="form">${Object.keys(E.FORMS).map(f => `<option value="${f}" ${f === fv ? 'selected' : ''}>${f}</option>`).join('')}</select></label></div>
           <button class="mv-b on" data-act2="applytac">Aplicar táctica</button>
           <h4>Cambio</h4><div class="mv-grid"><label>Sale<select data-g="out">${onF.filter(p => p.pos !== 'POR' || true).map(p => `<option value="${p.id}" ${(draft.out ? draft.out === p.id : gesSel && gesSel.out === p.id) ? 'selected' : ''}>${p.num} · ${esc(E.player(p.id).name)} (${p.pos})${rt(p.id)}</option>`).join('')}</select></label>
           <label>Entra<select data-g="in">${bench.map(id => `<option value="${id}" ${draft.in === id ? 'selected' : ''}>${esc(E.player(id).name)} (${E.player(id).pos})</option>`).join('') || '<option value="">Sin suplentes</option>'}</select></label></div>

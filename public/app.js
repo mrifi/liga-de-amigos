@@ -1055,6 +1055,11 @@ function tokHTML(id, pos, k, i, style) {
   const p = E.player(id), st = status(id), c = cond(id), isGk = p.pos === 'POR', ek = p.esp;
   return `<button class="tok ${ek ? 'tok-' + ek + ' ' : ''}${pos ? fitClass(id, pos) : ''} ${st ? 'out' : ''} ${sel ? 'sel' : ''}" style="${style}" data-act="slot" data-arg="${k}:${i}" aria-label="${esc(p.name)}, ${pos || p.pos}"><span class="jw">${ek ? `<span class="aura"></span>${ek === 'ley' ? LAUREL : STAR}` : ''}${ek ? shirt(`url(#espg-${ek})`, ek === 'ley' ? '#5a3a00' : '#06204a', ovrOf(id, t), 44) : shirt(isGk ? '#facc15' : c1, isGk ? '#111111' : c2, ovrOf(id, t), 44)}</span><span class="n">${esc(surname(p.name))}</span><span class="e"><i style="width:${c}%;${c < 75 ? 'background:var(--warn)' : ''}"></i></span></button>`;
 }
+/* perfil de la formación: qué gana y qué pierde en ataque, medio y defensa */
+function formProfHTML(f) {
+  const p = E.formProfile(f), lab = ['Ataque', 'Medio', 'Defensa'];
+  return `<div class="fprof"><p class="small mute" style="margin:0 0 6px">${esc(E.FDESC[f] || '')}</p><div class="fprof-r">${p.map((v, i) => { const d = Math.round((v - 1) * 100); return `<span class="fp ${d >= 2 ? 'up' : d <= -2 ? 'dn' : ''}"><b>${lab[i]}</b>${d > 0 ? '+' : ''}${d}%</span>`; }).join('')}</div></div>`;
+}
 function lineupView() {
   const L = ensureLin(), t = D.my, slots = E.FORMS[L.form], co = E.COORD[L.form], ctx = D.ctx(t);
   const str = E.lineStrength({ form: L.form, xi: L.xi }, ctx);
@@ -1065,8 +1070,8 @@ function lineupView() {
   const sel = (id, obj, v) => `<select id="${id}" data-chg="${id}">${Object.entries(obj).map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
   const outXI = L.xi.filter(id => id && status(id)).length;
   return `<div class="grid"><section class="panel"><div class="ph"><h3>${nx && !nx.live ? 'Para la jornada ' + nx.md : 'Tu once'}</h3><div style="display:flex;gap:6px"><button class="btn sm ghost" data-act="autoxi">Automática</button></div></div>
-  <div class="fields" style="margin-bottom:12px"><label class="f">Formación<select id="t-form" data-chg="form">${Object.keys(E.FORMS).map(f => `<option ${f === L.form ? 'selected' : ''}>${f}</option>`).join('')}</select></label>
-  <label class="f">Mentalidad${sel('t-ment', MENT, tac.ment)}</label><label class="f">Presión${sel('t-press', PRESS, tac.press)}</label><label class="f">Estilo${sel('t-est', EST, tac.est)}</label></div>
+  <div class="fields" style="margin-bottom:12px"><label class="f">Formación<select id="t-form" data-chg="form">${Object.keys(E.FORMS).map(f => `<option value="${f}" ${f === L.form ? 'selected' : ''}>${f}</option>`).join('')}</select></label>
+  <label class="f">Mentalidad${sel('t-ment', MENT, tac.ment)}</label><label class="f">Presión${sel('t-press', PRESS, tac.press)}</label><label class="f">Estilo${sel('t-est', EST, tac.est)}</label></div>${formProfHTML(L.form)}
   <label class="chk"><input type="checkbox" id="t-auto" data-chg="tauto" ${tac.auto !== false ? 'checked' : ''}> Cambios automáticos por cansancio si no haces ninguno</label>
   <div class="pitch">${pitchLines()}${toks}</div>
   <div class="grp">Banquillo</div><div class="bench">${bench}</div>
