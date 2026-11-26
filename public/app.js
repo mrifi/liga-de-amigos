@@ -570,7 +570,7 @@ const PACKS = {
 const PACK_ODDS = {
   bronce: [['Jugador de 65-74', 40], ['1-3 M€', 35], ['1 token', 25]],
   plata: [['Jugador de 75-82', 35], ['Promesa joven (≤21)', 15], ['3-6 M€', 25], ['2 tokens', 10], ['Bono (forma, cura o entreno)', 15]],
-  oro: [['1º premio: jugador de 80-85', 92], ['1º premio: CRACK de 86+ (1 por temporada)', 4.5], ['1º premio: HÉROE (84-89)', 3], ['1º premio: LEYENDA (88-96, 1 por temporada)', .5], ['Otros: jugador de 76-84', 30], ['Otros: 6-12 M€', 30], ['Otros: 3-4 tokens', 15], ['Otros: bono', 25]]
+  oro: [['1º premio: jugador de 80-85', 91.7], ['1º premio: CRACK de 86+ (1 por temporada)', 4.8], ['1º premio: HÉROE (84-89)', 3], ['1º premio: LEYENDA (88-96, 1 por temporada)', .5], ['Otros: jugador de 76-84', 30], ['Otros: 6-12 M€', 30], ['Otros: 3-4 tokens', 15], ['Otros: bono', 25]]
 };
 const ITEM_N = { forma: 'Bono de forma', cura: 'Bono de curación', entreno: 'Entreno extra' };
 const rnd = () => { const a = new Uint32Array(1); crypto.getRandomValues(a); return a[0] / 4294967296; };
@@ -588,8 +588,9 @@ function rollPack(kind, used) {
   if (kind === 'oro') {
     const rr = rnd(), full = t.squad.length >= SQ_MAX, legOk = !full && (t.packs || {}).leyS !== D.Sx && espCount(t, 'ley') < ESP_MAX.ley, herOk = !full && espCount(t, 'her') < ESP_MAX.her;
     const espPick = k => { const pool = espFree(k, used); if (!pool.length) return null; const id = pool[Math.floor(rnd() * pool.length)]; used.add(id); return { k: 'jugador', pid: id, o: E.player(id).base, tag: k }; };
-    const sp = rr < .005 && legOk ? espPick('ley') : rr < .035 && herOk ? espPick('her') : null;
-    out.push(sp || (!st.crackUsed && rnd() < .05 ? player(x => x.o >= 86, 'crack') : player(x => x.o >= 80 && x.o <= 85)));
+    const sp = rr < .005 ? (legOk ? espPick('ley') : null) : rr < .035 && herOk ? espPick('her') : null;
+    const crackOk = !st.crackUsed && pool.some(x => x.o >= 86 && !used.has(x.id)); // si no hay ningún crack libre, sale un 80-85 (no dinero)
+    out.push(sp || (crackOk && rnd() < .05 ? player(x => x.o >= 86, 'crack') : player(x => x.o >= 80 && x.o <= 85)));
     for (let i = 0; i < 2; i++) out.push(wpick([[() => player(x => x.o >= 76 && x.o <= 84), 30], [() => cash(6, 12), 30], [() => ({ k: 'tokens', v: 3 + Math.floor(rnd() * 2) }), 15], [item, 25]])());
   }
   return out;
@@ -1361,7 +1362,8 @@ function modal() {
 function playerModal(id) {
   const p = E.player(id), own = ownerOf(id), mine = own && D.my && own.id === D.my.id, o = ovrOf(id, own), a = E.age(p, D.Sx), v = E.value(o, a), st = D.stats[id] || {}, ss = own ? status(id) : null;
   let acts = '';
-  if (D.my && !own) acts = `<button class="btn y" data-act="buyfree" data-arg="${id}" ${canAfford(v) && D.my.squad.length < SQ_MAX ? '' : 'disabled'}>Fichar por ${money(v)}</button>`;
+  if (D.my && !own && p.esp) acts = `<p class="small mute">Solo se consigue en su subasta especial, en el sobre de oro o como premio de campeón.</p>`;
+  else if (D.my && !own) acts = `<button class="btn y" data-act="buyfree" data-arg="${id}" ${canAfford(v) && D.my.squad.length < SQ_MAX ? '' : 'disabled'}>Fichar por ${money(v)}</button>`;
   else if (D.my && own && !mine) acts = own.owner ? `<button class="btn y" data-act="offer" data-arg="${id}">Hacer oferta</button>` : `<button class="btn y" data-act="buyai" data-arg="${id}" ${canAfford(E.r1(v * 1.35)) && D.my.squad.length < SQ_MAX && own.squad.length > 17 ? '' : 'disabled'}>Comprar por ${money(E.r1(v * 1.35))}</button>${own.squad.length <= 17 ? '<p class="small mute">La IA no vende: se quedaría corta de plantilla.</p>' : ''}`;
   else if (mine) acts = `${ss && ss.why === 'Lesión' ? `<button class="btn y" data-act="heal" data-arg="${id}">Curar · ${D.my.items?.cura > 0 ? 'bono' : '4 tokens'}</button>` : ''}${!ss && cond(id) < 100 ? `<button class="btn y" data-act="boost" data-arg="${id}">Forma al 100% · ${D.my.items?.forma > 0 ? 'bono' : '2 tokens'}</button>` : ''}<button class="btn" data-act="auction" data-arg="${id}" ${D.my.squad.length > SQ_MIN ? '' : 'disabled'}>Subastar 30 min</button>${espOf(id) ? '' : `<button class="btn ghost" data-act="release" data-arg="${id}" ${D.my.squad.length > SQ_MIN ? '' : 'disabled'}>Liberar y cobrar ${money(E.r1(v * .5))}</button>`}`;
   const cols = own ? own.colors : ['#5b6b94', '#ffffff'];
@@ -1424,6 +1426,7 @@ function closeViewer(silent) { if (!VW) return; VW.destroy(); VW.el.remove(); VW
 async function lockPlayer(pid) { const l = await S.db.doc('bloqueos/p-' + pid).acquire({ holder: S.me, ttlMs: 10000 }); return l.acquired; }
 const ledgerAdd = (t, amt, why) => capLog([...(t.ledger || []), { d: Date.now(), amt: E.r1(amt), why }], 150, 'amt');
 async function buyFree(pid) {
+  if (espOf(pid)) return toast('Las leyendas y los héroes no se fichan como libres');
   const v = E.pval(pid, D.Sx, 0), t = D.my;
   if (!canAfford(v) || t.squad.length >= SQ_MAX) return;
   if (!(await lockPlayer(pid))) return toast('Otro mánager está fichándolo ahora mismo');
