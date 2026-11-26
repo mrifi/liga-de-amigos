@@ -986,7 +986,7 @@ function homeView() {
   const cash = D.fin(D.myIdx).cash; if (cash < 0) avisos.push(`<li><b class="neg-amt">Saldo negativo.</b> Vende algún jugador o los salarios te hundirán.</li>`);
   const rows = D.table, myPos = rows.findIndex(r => r.t === D.myIdx);
   const show = rows.filter((r, k) => k < 4 || Math.abs(k - myPos) <= 1);
-  return `<div class="grid"><div class="stackp">${espClaimHTML()}${main}${rulCard()}${objectiveHTML()}${upcomingHTML()}${last ? `<section class="panel"><div class="ph"><h3>Último partido · J${lastDoc.md}</h3><button class="btn sm" data-act="match" data-arg="${lastDoc.season}-${lastDoc.md}-${lastDoc.m.indexOf(last)}">${IC.play}Ver partido</button></div>${matchRow(last, lastDoc, lastDoc.m.indexOf(last))}</section>` : ''}</div>
+  return `<div class="grid"><div class="stackp">${espClaimHTML()}${main}${cityCard()}${rulCard()}${objectiveHTML()}${upcomingHTML()}${last ? `<section class="panel"><div class="ph"><h3>Último partido · J${lastDoc.md}</h3><button class="btn sm" data-act="match" data-arg="${lastDoc.season}-${lastDoc.md}-${lastDoc.m.indexOf(last)}">${IC.play}Ver partido</button></div>${matchRow(last, lastDoc, lastDoc.m.indexOf(last))}</section>` : ''}</div>
   <div class="stackp"><section class="panel"><div class="ph"><h3>Clasificación</h3><button class="btn sm ghost" data-act="go" data-arg="liga:tabla">Completa</button></div>${tableHTML(show, true)}</section>${prensaHTML()}${muroHTML(4)}
   <section class="panel"><h3>Avisos del míster</h3>${avisos.length ? `<ul class="small" style="padding-left:18px;margin:8px 0 0">${avisos.join('')}</ul>` : '<p class="mute small">Todo en orden, míster.</p>'}</section></div></div>`;
 }
@@ -1418,6 +1418,41 @@ function liveOpts(col, id, doc, k) {
 }
 /* Palco VIP 3D: va en un iframe aparte (palco/). Si no carga o falla, se cierra solo y sigue la vista normal. */
 let PALCO = null;
+/* Ciudad deportiva 3D (beta): mismo iframe aislado que el palco, en modo ciudad */
+const cityCard = () => S.flags && S.flags.ciudad === false ? '' : `<section class="panel city-card"><div class="ph"><h3>Ciudad deportiva 3D <span class="beta">beta</span></h3></div><p class="small mute">Pasea por tu club: estadio con palco VIP, entrenamientos, tienda y bar con las noticias de la liga. Mejor con el móvil en horizontal.</p><div class="acts"><button class="btn y" data-act="ciudad">Entrar en la ciudad</button></div></section>`;
+function openCity() {
+  if (PALCO || !D || !D.my) return;
+  const team = t => ({ name: (t && t.name) || 'Equipo', short: (t && (t.short || (t.name || '').slice(0, 3).toUpperCase())) || 'EQU', colors: (t && t.colors) || ['#1f9d55', '#f2f5ee'] });
+  const el = document.createElement('div'); el.className = 'palco-ov city'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Ciudad deportiva 3D');
+  el.innerHTML = '<iframe src="palco/index.html?city=1" title="Ciudad deportiva 3D" allow="autoplay; fullscreen"></iframe><button class="palco-x" aria-label="Salir de la ciudad">' + IC.x + '</button>';
+  document.body.appendChild(el);
+  const fr = el.querySelector('iframe');
+  const on = e => {
+    if (e.origin !== location.origin || e.source !== fr.contentWindow || !e.data) return;
+    const t = e.data.type;
+    if (t === 'palco-ready') {
+      clearTimeout(PALCO.to); PALCO.ready = true; el.classList.add('ready');
+      let d = {};
+      try {
+        const nx = myNext(), lastDoc = [...D.revealed].reverse().find(x => x.m.some(m => m.h === D.myIdx || m.a === D.myIdx)), lm = lastDoc && lastDoc.m.find(m => m.h === D.myIdx || m.a === D.myIdx);
+        const lv = E.stLvl(D.my), rivIdx = nx ? (nx.live ? (nx.m.h === D.myIdx ? nx.m.a : nx.m.h) : (nx.h === D.myIdx ? nx.a : nx.h)) : -1, riv = rivIdx >= 0 ? teamByIdx(rivIdx) : null;
+        const today = nx && (nx.live || new Date(nx.at).toDateString() === new Date().toDateString());
+        const news = [];
+        if (nx && riv) news.push(`${nx.live ? 'EN DIRECTO' : today ? 'HOY ' + S.cfg.hour : 'PRÓXIMO'} · ${D.my.name} contra ${riv.name}`);
+        if (lm) news.push(`ÚLTIMO PARTIDO · ${teamByIdx(lm.h).name} ${lm.hg}-${lm.ag} ${teamByIdx(lm.a).name}`);
+        Object.values(S.noticias || {}).filter(x => x && x.t && x.caption).sort((a, b) => b.t - a.t).slice(0, 3).forEach(x => news.push(String(x.caption).slice(0, 140)));
+        d = { team: team(D.my), level: lv <= 1 ? 1 : lv <= 3 ? 2 : 3, matchToday: !!today, rival: riv ? team(riv) : null, news, trophies: [],
+          last: lm ? { m: lm, H: team(teamByIdx(lm.h)), A: team(teamByIdx(lm.a)) } : null };
+      } catch (err) { console.warn(err); }
+      fr.contentWindow.postMessage({ type: 'city-init', ...d }, location.origin);
+    } else if (t === 'city-nav') { const tab = String(e.data.tab || ''); closePalco(); if (['equipo', 'mercado', 'club', 'liga', 'inicio'].includes(tab)) ACT.go(tab); }
+    else if (t === 'palco-close') closePalco();
+    else if (t === 'palco-error') closePalco('La ciudad no ha podido cargar. Sigues en el juego normal.');
+  };
+  PALCO = { el, on, to: setTimeout(() => closePalco('La ciudad tarda demasiado en cargar. Sigues en el juego normal.'), 45000) };
+  addEventListener('message', on);
+  el.querySelector('.palco-x').addEventListener('click', () => closePalco());
+}
 function closePalco(msg) { if (!PALCO) return; clearTimeout(PALCO.to); removeEventListener('message', PALCO.on); PALCO.el.remove(); PALCO = null; if (msg) toast(msg); VW && VW.el && VW.el.querySelector('.mvx')?.focus(); }
 function openPalco(opts, r) {
   if (PALCO || !opts.match) return;
@@ -1513,6 +1548,7 @@ const setOffer = (oid, status) => write('ofertas/' + oid, () => S.db.doc('oferta
 function ask(title, text, ok, fn, danger) { S.modal = { type: 'confirm', title, text, ok, fn, danger }; render(); }
 const ACT = {
   view: v => { S.view = v; S.sel = null; S.modal = null; render(); window.scrollTo(0, 0); },
+  ciudad: () => openCity(),
   go: a => { const [v, s] = a.split(':'); S.view = v; if (v === 'equipo') S.sub = s; if (v === 'liga') S.lsub = s; if (v === 'mercado') S.msub = s; if (v === 'club') S.csub = s; render(); window.scrollTo(0, 0); },
   sub: v => { S.sub = v; S.sel = null; render(); }, lsub: v => { S.lsub = v; render(); }, msub: v => { S.msub = v; render(); },
   md: v => { S.mdSel = Math.max(1, Math.min(D.total, +v)); render(); },
