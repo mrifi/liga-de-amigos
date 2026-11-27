@@ -205,15 +205,18 @@
     }
     return ps;
   }
+  // Desde el 27-11-2026 a las 18:00 (Madrid) no hay empates: se decide en penaltis y el ganador se lleva 3 puntos.
+  const PENS_FROM = Date.UTC(2026, 10, 27, 17, 0, 0);
+  const pensOf = (d, i) => d && d.pens && d.pens[i] && (d.at || 0) >= PENS_FROM ? d.pens[i] : null;
   function table(n, docs) {
     const rows = [...Array(n)].map((_, t) => ({ t, pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, pts: 0, form: [] }));
-    for (const d of docs) for (const m of d.m) {
-      const H = rows[m.h], A = rows[m.a];
+    for (const d of docs) d.m.forEach((m, i) => {
+      const H = rows[m.h], A = rows[m.a], p = m.hg === m.ag ? pensOf(d, i) : null;
       H.pj++; A.pj++; H.gf += m.hg; H.gc += m.ag; A.gf += m.ag; A.gc += m.hg;
-      if (m.hg > m.ag) { H.g++; A.p++; H.pts += 3; H.form.push('G'); A.form.push('P'); }
-      else if (m.hg < m.ag) { A.g++; H.p++; A.pts += 3; A.form.push('G'); H.form.push('P'); }
+      if (m.hg > m.ag || (p && p[0] > p[1])) { H.g++; A.p++; H.pts += 3; H.form.push('G'); A.form.push('P'); }
+      else if (m.hg < m.ag || p) { A.g++; H.p++; A.pts += 3; A.form.push('G'); H.form.push('P'); }
       else { H.e++; A.e++; H.pts++; A.pts++; H.form.push('E'); A.form.push('E'); }
-    }
+    });
     return rows.sort((a, b) => b.pts - a.pts || (b.gf - b.gc) - (a.gf - a.gc) || b.gf - a.gf || a.t - b.t);
   }
   function prize(rank, n) { return r1(25 - rank * (22 / Math.max(1, n - 1))); }
@@ -583,7 +586,8 @@
     const n = teams.length, fx = fixtures(n, cfg.seed + ':' + S)[md - 1], state = deriveState(prev, adjOf(teams)), formOf = formHelper(n, prev);
     const pre = fx.map(([h, a], k) => buildPre(cfg, teams, h, a, S, md, state, formOf, cfg.seed + ':' + S + ':' + md + ':' + k, allDocs));
     if (lv) return { season: S, md, at, pre, lv: 1, sl: lv.sl, pr: lv.pr, m: pre.map(p => resultFromPre(p, [], lv)), v: 2 };
-    return { season: S, md, at, pre, m: pre.map(p => resultFromPre(p, [])), v: 2 };
+    const m = pre.map(p => resultFromPre(p, []));
+    return { season: S, md, at, pre, m, v: 2, ...(at >= PENS_FROM ? { pens: m.map((x, k) => x.part == null && x.hg === x.ag ? penaltyShootout(pre[k].seed) : null) } : {}) };
   }
   function simulateFriendly(cfg, teams, h, a, S, prev, seed) {
     const md = prev.length + 1, state = deriveState(prev, adjOf(teams));
@@ -690,12 +694,12 @@
   const CL_RR = [[[0, 1], [2, 3]], [[0, 2], [3, 1]], [[3, 0], [1, 2]]];
   function groupTable(group, docs) {
     const row = {}; group.forEach(t => { row[t] = { t, pj: 0, pts: 0, gf: 0, gc: 0 }; });
-    for (const d of docs) for (const m of d.m) { if (!(m.h in row) || !(m.a in row)) continue; const H = row[m.h], A = row[m.a]; H.pj++; A.pj++; H.gf += m.hg; H.gc += m.ag; A.gf += m.ag; A.gc += m.hg; if (m.hg > m.ag) H.pts += 3; else if (m.hg < m.ag) A.pts += 3; else { H.pts++; A.pts++; } }
+    for (const d of docs) d.m.forEach((m, i) => { if (!(m.h in row) || !(m.a in row)) return; const H = row[m.h], A = row[m.a], p = m.hg === m.ag ? pensOf(d, i) : null; H.pj++; A.pj++; H.gf += m.hg; H.gc += m.ag; A.gf += m.ag; A.gc += m.hg; if (m.hg > m.ag || (p && p[0] > p[1])) H.pts += 3; else if (m.hg < m.ag || p) A.pts += 3; else { H.pts++; A.pts++; } });
     return Object.values(row).sort((x, y) => y.pts - x.pts || (y.gf - y.gc) - (x.gf - x.gc) || y.gf - x.gf || group.indexOf(x.t) - group.indexOf(y.t));
   }
   const cupWinner = (doc, k) => { const x = doc.m[k], p = doc.pens[k]; return x.hg > x.ag || (p && p[0] > p[1]) ? x.h : x.a; };
   const formProfile = form => { const w = [0, 0, 0], fm = FMOD[form] || [1, 1, 1]; (FORMS[form] || []).forEach(p => W[p].forEach((v, i) => { w[i] += v; })); return w.map((v, i) => Math.pow(v / K[i], .2) * fm[i]); };
   // minuto de partido (1-94) a partir de los ms transcurridos desde el inicio; el descanso se queda en el 45
   const minAt = ms => { const h1 = 45.5 / 94 * PLAY_MS; if (ms < h1) return Math.max(1, Math.min(45, Math.floor(ms / PLAY_MS * 94) + 1)); if (ms < h1 + HT_MS) return 45; return Math.max(46, Math.min(94, Math.floor((ms - HT_MS) / PLAY_MS * 94) + 1)); };
-  G.ENG = { PLAY_MS, HT_MS, minAt, ESP, espOf, FDESC, formProfile, clDraw, drawTime, cupMeetRound, DRAW_SHOW: 4 * 60000, SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
+  G.ENG = { PENS_FROM, pensOf, PLAY_MS, HT_MS, minAt, ESP, espOf, FDESC, formProfile, clDraw, drawTime, cupMeetRound, DRAW_SHOW: 4 * 60000, SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
 })(typeof window !== 'undefined' ? window : globalThis);

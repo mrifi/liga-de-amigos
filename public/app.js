@@ -117,7 +117,7 @@ function resolveDoc(doc, col) {
   });
   if (!changed) return doc;
   const out = { ...doc, m };
-  if (lv && col !== 'jor') out.pens = m.map((x, k) => x.part == null && x.hg === x.ag ? E.penaltyShootout(doc.pre[k].seed + ':' + lv.sl[MAXSEG]) : null);
+  if (lv && (col !== 'jor' || (doc.at || 0) >= E.PENS_FROM)) out.pens = m.map((x, k) => x.part == null && x.hg === x.ag ? E.penaltyShootout(doc.pre[k].seed + ':' + lv.sl[MAXSEG]) : null);
   return out;
 }
 const liveDocs = () => [...Object.entries(S.jor).map(([id, d]) => ['jornadas', id, withVivo('jornadas', id, d)]), ...Object.entries(S.cupRaw).map(([id, d]) => ['copa', id, withVivo('copa', id, d)]), ...Object.entries(S.clRaw).map(([id, d]) => ['champions', id, withVivo('champions', id, d)])];
@@ -190,7 +190,7 @@ async function finalize() {
   const l = await ref.acquire({ holder: S.me || 'anon' + Math.random(), ttlMs: 15000 }); if (!l.acquired) return true;
   const fresh = (await ref.get()).data(); if (!fresh || fresh.fin) return true;
   const vv = (await S.db.doc('vivo/' + col + '_' + key).get()).data(); if (vv) S.vivo[col + '_' + key] = vv;
-  const res = resolveDoc(withVivo(col, key, { ...fresh }), cc), upd = { m: res.m, fin: true }; if (cc !== 'jor' && res.pens) upd.pens = res.pens;
+  const res = resolveDoc(withVivo(col, key, { ...fresh }), cc), upd = { m: res.m, fin: true }; if ((cc !== 'jor' || (fresh.at || 0) >= E.PENS_FROM) && res.pens) upd.pens = res.pens;
   await ref.update(upd); const store = col === 'jornadas' ? S.jor : col === 'copa' ? S.cupRaw : S.clRaw; store[key] = { ...fresh, ...upd };
   return true;
 }
@@ -1173,7 +1173,7 @@ function matchRow(m, doc, k) {
   let sc, lv = false;
   if (!doc || now < doc.at) sc = new Date(doc ? doc.at : kickAt(S.mdSel)).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
   else if (now < doc.at + LIVE) { const mn = liveMinute(doc), [h, a] = scoreAt(m, mn); sc = `${h}-${a}<small>${Math.min(mn, 90)}'</small>`; lv = true; }
-  else sc = m.hg + '-' + m.ag;
+  else { const p = m.hg === m.ag && E.pensOf(doc, k); sc = m.hg + '-' + m.ag + (p ? `<small>pen. ${p[0]}-${p[1]}</small>` : ''); }
   const inner = `<span class="h"><span>${esc(H.name)}</span>${crest(H, 26)}</span><span class="sc ${lv ? 'lv' : ''}">${sc}</span><span class="a">${crest(A, 26)}<span>${esc(A.name)}</span></span>`;
   return doc && now >= doc.at ? `<button class="mrow" data-act="match" data-arg="${doc.season}-${doc.md}-${k}" aria-label="Ver partido">${inner}</button>` : `<div class="mrow" style="cursor:default">${inner}</div>`;
 }
@@ -1401,7 +1401,7 @@ function endSummary(kind, doc, extra) {
   return m => {
     const H = teamByIdx(m.h), A = teamByIdx(m.a), my = D && D.my ? D.myIdx : -1, side = m.h === my ? 0 : m.a === my ? 1 : -1;
     const me = side < 0 ? null : side ? m.ag : m.hg, op = side < 0 ? null : side ? m.hg : m.ag;
-    let pens = extra && extra.pens; const res = side < 0 ? 'Final' : me > op ? '¡Victoria!' : me < op ? (pens && (side ? pens[1] > pens[0] : pens[0] > pens[1]) ? '¡Pasáis por penaltis!' : 'Derrota') : pens ? ((side ? pens[1] > pens[0] : pens[0] > pens[1]) ? '¡Pasáis por penaltis!' : 'Fuera por penaltis') : 'Empate';
+    let pens = extra && extra.pens; const res = side < 0 ? 'Final' : me > op ? '¡Victoria!' : me < op ? (pens && (side ? pens[1] > pens[0] : pens[0] > pens[1]) ? '¡Pasáis por penaltis!' : 'Derrota') : pens ? ((side ? pens[1] > pens[0] : pens[0] > pens[1]) ? (kind === 'league' ? '¡Ganáis en los penaltis!' : '¡Pasáis por penaltis!') : (kind === 'league' ? 'Perdéis en los penaltis' : 'Fuera por penaltis')) : 'Empate';
     const mvp = m.mvp ? E.player(m.mvp) : null, rt = m.mvp && m.rat ? m.rat[m.mvp] : null;
     const lg = kind === 'cup' ? 'copa' : kind === 'cl' ? 'champions' : kind === 'league' ? 'liga' : null;
     let h = `${lg ? `<div class="mv-endl0">${compLogo(lg, 52)}</div>` : ''}<h3 class="mv-endt">${res}</h3><div class="mv-ends">${crest(H, 40)}<b>${m.hg}-${m.ag}</b>${crest(A, 40)}</div>${pens ? `<p class="mv-endp">Penaltis ${pens[0]}-${pens[1]}</p>` : ''}`;
@@ -1575,7 +1575,7 @@ const ACT = {
       const side = m.h === D.myIdx ? 0 : 1, okey = 's' + ss + '-m' + md + '-t' + D.myIdx;
       manage = { side, bench: doc.pre[k].side[side].bench, onOrder: o => { if (Date.now() > doc.at + LIVE) return toast('El partido ya ha terminado'); const cur = S.orders[okey]?.list || []; const nowMin = E.minAt(Date.now() - doc.at); const ord = { ...o, m: Math.max(o.m, nowMin), t: Date.now() }; write('ordenes/' + okey, () => S.db.doc('ordenes/' + okey).set({ season: ss, md, team: D.myIdx, list: [...cur, ord] })).then(() => toast(o.k === 'sub' ? 'Cambio hecho' : 'Táctica cambiada')); } };
     }
-    openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...lo, speed: 4, manage, summary: endSummary('league', doc) });
+    openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...lo, speed: 4, manage, summary: endSummary('league', doc, { get pens() { const d = (D.all || []).find(x => x.season === doc.season && x.md === doc.md) || doc, mm = d.m[k]; return mm && mm.hg === mm.ag ? E.pensOf(d, k) : null; } }) });
   },
   friendly: () => { S.modal = { type: 'friendly' }; render(); },
   pack: a => { const [k, pay] = a.split(':'); openPack(k, pay); },
