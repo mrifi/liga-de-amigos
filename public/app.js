@@ -964,6 +964,20 @@ function myNext() {
   const pair = D.fx[md - 1]?.find(([h, a]) => h === i || a === i);
   return pair ? { live: false, md, h: pair[0], a: pair[1], at: kickAt(md) } : null;
 }
+/* Copa o Champions en directo con mi equipo: aviso en Inicio para entrar al directo */
+function liveCompHTML() {
+  if (!D.my) return '';
+  const now = Date.now(), out = [];
+  for (const [k, src, act, name] of [['cup', S.cup, 'cupmatch', 'Copa'], ['cl', S.cl, 'clmatch', 'Champions']]) {
+    for (const id in src || {}) {
+      const doc = src[id]; if (!doc || !doc.m || !id.startsWith('s' + D.Sx + '-r') || now < doc.at || now >= doc.at + LIVE) continue;
+      const i = doc.m.findIndex(m => m && (m.h === D.myIdx || m.a === D.myIdx)); if (i < 0) continue;
+      const m = doc.m[i], H = teamByIdx(m.h), A = teamByIdx(m.a), [x, y] = scoreAt(m, liveMinute(doc));
+      out.push(`<section class="panel livecomp"><div class="ph"><h3><span class="lvdot"></span> ${name} en directo</h3></div><div class="mrow mine" style="cursor:default"><span class="h"><span>${esc(H.name)}</span>${crest(H, 24)}</span><span class="sc lv">${x}-${y}</span><span class="a">${crest(A, 24)}<span>${esc(A.name)}</span></span></div><div class="acts"><button class="btn y" data-act="${act}" data-arg="${id.split('-r')[1]}-${i}">Ver en directo</button></div></section>`);
+    }
+  }
+  return out.join('');
+}
 function homeView() {
   if (!D.my) return pickTeamView();
   const nx = myNext(), lastDoc = [...D.revealed].reverse().find(d => d.m.some(m => m.h === D.myIdx || m.a === D.myIdx));
@@ -986,7 +1000,7 @@ function homeView() {
   const cash = D.fin(D.myIdx).cash; if (cash < 0) avisos.push(`<li><b class="neg-amt">Saldo negativo.</b> Vende algún jugador o los salarios te hundirán.</li>`);
   const rows = D.table, myPos = rows.findIndex(r => r.t === D.myIdx);
   const show = rows.filter((r, k) => k < 4 || Math.abs(k - myPos) <= 1);
-  return `<div class="grid"><div class="stackp">${espClaimHTML()}${main}${cityCard()}${rulCard()}${objectiveHTML()}${upcomingHTML()}${last ? `<section class="panel"><div class="ph"><h3>Último partido · J${lastDoc.md}</h3><button class="btn sm" data-act="match" data-arg="${lastDoc.season}-${lastDoc.md}-${lastDoc.m.indexOf(last)}">${IC.play}Ver partido</button></div>${matchRow(last, lastDoc, lastDoc.m.indexOf(last))}</section>` : ''}</div>
+  return `<div class="grid"><div class="stackp">${espClaimHTML()}${liveCompHTML()}${main}${cityCard()}${rulCard()}${objectiveHTML()}${upcomingHTML()}${last ? `<section class="panel"><div class="ph"><h3>Último partido · J${lastDoc.md}</h3><button class="btn sm" data-act="match" data-arg="${lastDoc.season}-${lastDoc.md}-${lastDoc.m.indexOf(last)}">${IC.play}Ver partido</button></div>${matchRow(last, lastDoc, lastDoc.m.indexOf(last))}</section>` : ''}</div>
   <div class="stackp"><section class="panel"><div class="ph"><h3>Clasificación</h3><button class="btn sm ghost" data-act="go" data-arg="liga:tabla">Completa</button></div>${tableHTML(show, true)}</section>${prensaHTML()}${muroHTML(4)}
   <section class="panel"><h3>Avisos del míster</h3>${avisos.length ? `<ul class="small" style="padding-left:18px;margin:8px 0 0">${avisos.join('')}</ul>` : '<p class="mute small">Todo en orden, míster.</p>'}</section></div></div>`;
 }
