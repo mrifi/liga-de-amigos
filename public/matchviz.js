@@ -1,13 +1,13 @@
 /* Visor de partidos: convierte un resultado simulado en un directo animado (2D y 3D). */
 (function (G) {
   'use strict';
-  const E = G.ENG, FL = 105, FW = 68, LIVE_S = E.LIVE_MS / 1000, MINS = 94, RH = 45.5 / MINS * LIVE_S;
+  const E = G.ENG, FL = 105, FW = 68, LIVE_S = E.LIVE_MS / 1000, PLAY_S = (E.PLAY_MS || E.LIVE_MS) / 1000, HT_S = (E.HT_MS || 0) / 1000, MINS = 94, RH = 45.5 / MINS * PLAY_S;
   const STD = { POR: [1, 13, 25], LD: [2, 12, 26], LI: [3, 17, 27], DFC: [4, 5, 15, 24], MCD: [6, 16, 28], MC: [8, 14, 18], MCO: [10, 20], ED: [7, 22], EI: [11, 21], DC: [9, 19, 23] };
   const SHOTW = { POR: 0, DFC: .3, LD: .4, LI: .4, MCD: .6, MC: 1.2, MCO: 2.4, ED: 3, EI: 3, DC: 5 };
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x)), lerp = (a, b, f) => a + (b - a) * f;
   const hyp = (ax, ay, bx, by) => { const dx = ax - bx, dy = ay - by; return Math.sqrt(dx * dx + dy * dy); };
-  const rOf = m => Math.max(2, (m - .5) / MINS * LIVE_S);
-  const minuteAt = r => r < RH ? Math.min(45, Math.floor(r / LIVE_S * MINS) + 1) : Math.min(94, Math.floor(r / LIVE_S * MINS) + 1);
+  const rOf = m => Math.max(2, (m - .5) / MINS * PLAY_S + (m > 45 ? HT_S : 0));
+  const minuteAt = r => r < RH ? Math.min(45, Math.floor(r / PLAY_S * MINS) + 1) : r < RH + HT_S ? 45 : Math.max(46, Math.min(94, Math.floor((r - HT_S) / PLAY_S * MINS) + 1));
   const dirOf = (s, t) => ((s === 0) === (t < RH)) ? 1 : -1;
   const U = (s, t, x) => dirOf(s, t) > 0 ? x : FL - x;
   const X = (s, t, u) => dirOf(s, t) > 0 ? u : FL - u;
@@ -51,7 +51,7 @@
       side[s].used = used;
     }
     const evs = m.ev.slice().sort((a, b) => a.m - b.m); let lastM = -1, k = 0;
-    const evT = evs.map(e => { k = e.m === lastM ? k + 1 : 0; lastM = e.m; let tt = rOf(e.m) + k * 2.6; if (tt > RH - 3 && tt < RH + 5) tt = e.m <= 45 ? Math.min(tt, RH - 3) : RH + 5 + k * 2.6; return { ...e, tt }; });
+    const evT = evs.map(e => { k = e.m === lastM ? k + 1 : 0; lastM = e.m; let tt = rOf(e.m) + k * 2.6; if (tt > RH - 3 && tt < RH + HT_S + 5) tt = e.m <= 45 ? Math.min(tt, RH - 3) : RH + HT_S + 5 + k * 2.6; return { ...e, tt }; });
     for (const e of evT) {
       if (e.t === 'cam' && P[e.q]) {
         const out = P[e.q]; out.to = e.tt; const used = side[e.s].used; let num = 12; while (used.has(num)) num++; used.add(num);
@@ -610,8 +610,8 @@
         if (!halfDone && t >= RH - .4 && !(pi < plays.length && plays[pi].h1 === true && t < RH + 25) && (!script || t >= RH + (SHORT ? 14 : 2)) && (!SHORT || (!ball.fl && !ball.net && !pending.some(p => p.tag === 'ko')) || t >= RH + 25)) {
           halfDone = true; script = null; ball.fl = null; ball.net = null; ball.dead = { until: 1e9, walk: true };
           for (const ph of phases) if (ph.t1 > t) ph.t1 = t;
-          banners.push({ t, d: 3, type: 'half' }); say(t, 'Descanso.', true);
-          halfAt = t + .6; later(halfAt, tt => kickoff(1, tt), 'ko');
+          banners.push({ t, d: Math.max(3, HT_S), type: 'half' }); say(t, 'Descanso.', true);
+          halfAt = t + .6 + HT_S; later(halfAt, tt => kickoff(1, tt), 'ko');
         }
         if (!script && pi < plays.length) {
           const pl = plays[pi], post = pl.h1 === undefined ? pl.t > RH : !pl.h1;
@@ -1304,7 +1304,7 @@
       const mn = fin ? 'Final' : smp.minute > 90 ? '90+' + (smp.minute - 90) + "'" : smp.minute + "'";
       const sc = smp.score[0] + '-' + smp.score[1];
       if (sc !== lastScore) { lastScore = sc; el.score.textContent = sc; if (fxOn && !snap) { el.score.classList.remove('pop'); void el.score.offsetWidth; el.score.classList.add('pop'); } }
-      el.clk.textContent = smp.r < RH + .2 && smp.r > RH - .5 ? 'Descanso' : mn;
+      el.clk.textContent = smp.r < RH + HT_S + .6 && smp.r > RH - .5 ? 'Descanso' : mn;
       if (view === '2d' && r2) r2.draw(smp, pls, fx); else if (view === '3d' && r3) r3.draw(smp, pls, dt, snap, fx);
       banner(smp); panel(smp);
       const sk = root.querySelector('.mv-seek'); if (sk && document.activeElement !== sk) sk.value = Math.round(r);

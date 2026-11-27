@@ -1,7 +1,7 @@
 /* Motor del juego: lógica pura, sin DOM. Todo es determinista a partir de semillas. */
 (function (G) {
   'use strict';
-  const SEG = 3, HOME_P = .03, PRES_P = .08, DAY = 86400000, LIVE_MS = 4 * 60000, BASE_YEAR = 2026, START_CASH = 40, TICKET = 45;
+  const SEG = 3, HOME_P = .03, PRES_P = .08, DAY = 86400000, PLAY_MS = 8 * 60000, HT_MS = 40000, LIVE_MS = PLAY_MS + HT_MS, BASE_YEAR = 2026, START_CASH = 40, TICKET = 45;
   const PRIZE = { w: 1.0, d: 0.45, l: 0.15 };
   // el club empieza en un campo municipal y crece con su afición (estilo Top Eleven)
   const STADIUM = [
@@ -695,5 +695,7 @@
   }
   const cupWinner = (doc, k) => { const x = doc.m[k], p = doc.pens[k]; return x.hg > x.ag || (p && p[0] > p[1]) ? x.h : x.a; };
   const formProfile = form => { const w = [0, 0, 0], fm = FMOD[form] || [1, 1, 1]; (FORMS[form] || []).forEach(p => W[p].forEach((v, i) => { w[i] += v; })); return w.map((v, i) => Math.pow(v / K[i], .2) * fm[i]); };
-  G.ENG = { ESP, espOf, FDESC, formProfile, clDraw, drawTime, cupMeetRound, DRAW_SHOW: 4 * 60000, SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
+  // minuto de partido (1-94) a partir de los ms transcurridos desde el inicio; el descanso se queda en el 45
+  const minAt = ms => { const h1 = 45.5 / 94 * PLAY_MS; if (ms < h1) return Math.max(1, Math.min(45, Math.floor(ms / PLAY_MS * 94) + 1)); if (ms < h1 + HT_MS) return 45; return Math.max(46, Math.min(94, Math.floor((ms - HT_MS) / PLAY_MS * 94) + 1)); };
+  G.ENG = { PLAY_MS, HT_MS, minAt, ESP, espOf, FDESC, formProfile, clDraw, drawTime, cupMeetRound, DRAW_SHOW: 4 * 60000, SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -85,7 +85,7 @@ function ordersFor(doc, k) {
 }
 /* ---------- partido en directo: el resultado se sortea por tramos de 3 minutos justo antes de jugarse ---------- */
 const MAXSEG = Math.floor(92 / E.SEG), PRES_TTL = 40000;
-const curMin = (doc, now) => Math.max(1, Math.min(94, Math.floor((now - doc.at) / LIVE * 94) + 1));
+const curMin = (doc, now) => E.minAt(now - doc.at);
 // se sortean dos tramos por delante: la animación necesita unos segundos para preparar cada jugada
 const segNeed = (doc, now) => Math.min(MAXSEG, Math.floor((curMin(doc, now) - 1 + 2 * E.SEG) / E.SEG));
 // las semillas en directo van en un documento pequeño aparte (vivo/<colección>_<id>) para no reescribir la jornada entera
@@ -178,7 +178,7 @@ const ovrOf = (id, t) => E.ovr(id, D.Sx, t?.xp?.[id] || 0);
 const ownerOf = id => D.teams.find(t => t.squad.includes(id)) || null;
 function status(id) { const st = D.state[id]; if (st && st.out >= D.nextMd) return { why: st.why, n: st.out - D.nextMd + 1 }; return null; }
 const cond = id => Math.round(D.state[id]?.cond ?? 100);
-function liveMinute(doc) { const now = Date.now(); if (S.rp && S.rp.key === doc.season + '-' + doc.md) { const el = now - S.rp.t0; if (el < 21000) return Math.min(94, Math.floor(el / 20000 * 94)); S.rp = null; } if (now >= doc.at + LIVE) return 99; return Math.max(0, Math.min(94, Math.floor((now - doc.at) / LIVE * 94))); }
+function liveMinute(doc) { const now = Date.now(); if (S.rp && S.rp.key === doc.season + '-' + doc.md) { const el = now - S.rp.t0; if (el < 21000) return Math.min(94, Math.floor(el / 20000 * 94)); S.rp = null; } if (now >= doc.at + LIVE) return 99; return Math.max(0, E.minAt(now - doc.at) - 1); }
 function scoreAt(m, min) { let h = 0, a = 0; m.ev.forEach(e => { if (e.t === 'gol' && e.m <= min) e.s ? a++ : h++; }); return [h, a]; }
 
 /* ---------- simulación perezosa: el primero que abre tras el pitido juega la jornada ---------- */
@@ -1373,7 +1373,7 @@ function modal() {
     inner = `<h2>Partido amistoso</h2><p class="mute">Se simula al momento con tu alineación y tu táctica guardadas. No cuenta para la liga, no cansa ni lesiona a nadie, y no lo ve nadie más.</p>
     <label class="f">Rival<select id="f-rival">${D.teams.filter(t => t.id !== D.my.id).map(t => `<option value="${t.idx}">${esc(t.name)}${t.owner ? '' : ' (IA)'}</option>`).join('')}</select></label>
     <div class="fields" style="margin:12px 0"><label class="f">Vista<select id="f-view"><option value="3d" ${v === '3d' ? 'selected' : ''}>3D estadio</option><option value="2d" ${v === '2d' ? 'selected' : ''}>2D campo</option></select></label>
-    <label class="f">Ritmo<select id="f-speed"><option value="1">Ritmo de directo (${Math.round(LIVE / 60000)} min)</option><option value="4">Rápido x4 (1 min)</option><option value="h">Solo las jugadas</option></select></label></div>
+    <label class="f">Ritmo<select id="f-speed"><option value="1">Ritmo de directo (${Math.round(LIVE / 60000)} min)</option><option value="4">Rápido x4 (${Math.round(LIVE / 240000)} min)</option><option value="h">Solo las jugadas</option></select></label></div>
     <button class="btn y" data-act="playfriendly">${IC.play}Jugar amistoso</button>`;
   }
   return `<div class="ov" data-act="ovclose"><div class="sheet" role="dialog" aria-modal="true"><button class="x" data-act="close" aria-label="Cerrar">${IC.x}</button>${inner}</div></div>`;
@@ -1573,7 +1573,7 @@ const ACT = {
     let manage = null;
     if (live && doc.pre && D.my && S.canWrite && (m.h === D.myIdx || m.a === D.myIdx)) {
       const side = m.h === D.myIdx ? 0 : 1, okey = 's' + ss + '-m' + md + '-t' + D.myIdx;
-      manage = { side, bench: doc.pre[k].side[side].bench, onOrder: o => { if (Date.now() > doc.at + LIVE) return toast('El partido ya ha terminado'); const cur = S.orders[okey]?.list || []; const nowMin = Math.floor((Date.now() - doc.at) / LIVE * 94) + 1; const ord = { ...o, m: Math.max(o.m, nowMin), t: Date.now() }; write('ordenes/' + okey, () => S.db.doc('ordenes/' + okey).set({ season: ss, md, team: D.myIdx, list: [...cur, ord] })).then(() => toast(o.k === 'sub' ? 'Cambio hecho' : 'Táctica cambiada')); } };
+      manage = { side, bench: doc.pre[k].side[side].bench, onOrder: o => { if (Date.now() > doc.at + LIVE) return toast('El partido ya ha terminado'); const cur = S.orders[okey]?.list || []; const nowMin = E.minAt(Date.now() - doc.at); const ord = { ...o, m: Math.max(o.m, nowMin), t: Date.now() }; write('ordenes/' + okey, () => S.db.doc('ordenes/' + okey).set({ season: ss, md, team: D.myIdx, list: [...cur, ord] })).then(() => toast(o.k === 'sub' ? 'Cambio hecho' : 'Táctica cambiada')); } };
     }
     openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...lo, speed: 4, manage, summary: endSummary('league', doc) });
   },
