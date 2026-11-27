@@ -19,6 +19,23 @@ const LINE = { POR: 'G', DFC: 'D', LD: 'D', LI: 'D', CAD: 'D', CAI: 'D', MCD: 'M
 /* ---------------- plantillas (HTML) ---------------- */
 const crest = (t, size = 150) => { const [a, b] = t?.colors || ['#334', '#fff']; return `<div style="width:${size}px;height:${Math.round(size * 1.13)}px;margin:0 auto;background:${esc(a)};color:${esc(b)};clip-path:polygon(50% 0,100% 12%,100% 60%,50% 100%,0 60%,0 12%);display:grid;place-items:center;font-family:Anton;font-size:${Math.round(size * .37)}px">${esc(t?.short || '???')}</div>`; };
 const T = {
+  /* cuadro de la copa: d = { titulo, sub, rounds: [{ name, date, matches: [[A, B], ...] }] }; equipo = { name, nick, human, colors, win } o null (por decidir) */
+  cuadro: d => { const R = d.rounds.length, H = 1350 - 300, colW = Math.floor((1080 - 120) / R);
+    const team = (t, top) => !t ? `<div style="height:58px;display:flex;align-items:center;gap:12px;padding:0 14px;border-radius:12px;background:rgba(255,255,255,.05);border:2px dashed rgba(255,255,255,.18);color:#94a3b8;font:600 22px P">Por decidir</div>`
+      : `<div style="height:58px;display:flex;align-items:center;gap:12px;padding:0 14px;border-radius:12px;background:${t.human ? 'linear-gradient(90deg,rgba(250,204,21,.28),rgba(250,204,21,.08))' : 'rgba(255,255,255,.07)'};border:2px solid ${t.human ? '#facc15' : 'rgba(255,255,255,.12)'};${t.win === false ? 'opacity:.45;' : ''}">
+        <div style="flex:none;width:30px;height:34px;background:${esc((t.colors || [])[0] || '#334')};border:3px solid ${esc((t.colors || [])[1] || '#fff')};clip-path:polygon(50% 0,100% 12%,100% 60%,50% 100%,0 60%,0 12%)"></div>
+        <div style="min-width:0;line-height:1.05"><div style="font:700 ${colW < 330 ? 21 : 24}px P;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.name)}</div><div style="font:600 16px P;color:${t.human ? '#fde68a' : '#94a3b8'}">${esc(t.human ? t.nick : 'IA')}</div></div></div>`;
+    return `<section class="c pt" id="n20" style="background:radial-gradient(120% 70% at 50% 0%,#1d4f2a 0%,#0b1a12 55%,#06100b 100%);color:#fff">
+    <div style="position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(255,255,255,.025) 0 90px,transparent 90px 180px)"></div>
+    <div style="position:relative;text-align:center;padding-top:54px"><div style="font:700 26px P;letter-spacing:.3em;color:#86efac">${esc(d.sub)}</div>
+      <div style="font:400 112px/1 Anton;letter-spacing:.02em;margin-top:8px">${esc(d.titulo)}</div></div>
+    <div style="position:absolute;left:60px;right:60px;top:250px;height:${H}px;display:grid;grid-template-columns:repeat(${R},1fr);gap:0">
+      ${d.rounds.map((r, ri) => `<div style="position:relative;display:flex;flex-direction:column;padding:0 ${ri < R - 1 ? 22 : 0}px 0 ${ri ? 22 : 0}px">
+        <div style="text-align:center;margin-bottom:14px"><div style="font:400 40px Anton;color:#facc15">${esc(r.name)}</div><div style="font:600 18px P;color:#cbd5e1">${esc(r.date || '')}</div></div>
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:space-around">${r.matches.map(([a, b]) => `<div style="display:flex;flex-direction:column;gap:8px;position:relative">${team(a)}${team(b)}
+          ${ri < R - 1 ? `<div style="position:absolute;right:-22px;top:50%;width:22px;height:3px;background:rgba(250,204,21,.6)"></div>` : ''}</div>`).join('')}</div></div>`).join('')}
+    </div>
+    <div style="position:absolute;bottom:40px;left:0;right:0;text-align:center;font:700 26px P;color:#fde68a">🏆 ${esc(d.pie || '')}</div></section>`; },
   portada: d => `<section class="c pt" id="n1">
   <div class="mast"><h1><small>EL DIARIO QUE NADIE PIDIÓ</small>VESTUARIO</h1><div class="meta">${esc(d.fecha)}<br>Año ${esc(d.anyo)} · Nº ${esc(d.num)}<br>1,50 €</div></div>
   <div class="bar">LIGA DE AMIGOS <span>· ${esc(d.barra)} ·</span> COPA <span>·</span> CHAMPIONS <span>·</span> MERCADO</div>

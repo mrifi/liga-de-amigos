@@ -229,6 +229,7 @@ function tick() {
 function onFinal(lg, k, id, d) {
   const code = lg.code, chat = chatOf(code); if (!chat || !lg.cfg) return;
   if (Date.now() - (d.at || 0) > 2 * DAY) return; // no repetir partidos antiguos al arrancar
+  if (k === 'cup') once(code + ':cuadro:' + id, () => setTimeout(() => sendCuadro(lg, chat, '📋 <b>Así queda el cuadro de la Copa</b>'), 8000));
   once(code + ':fin:' + k + id, () => {
     const title = k === 'jor' ? `⚽ Resultados · Jornada ${d.md}` : k === 'cup' ? `🏆 Copa · ${E.cupRoundName(+String(id).split('-r')[1], E.cupBracket(lg.cfg.n, lg.cfg.seed + ':' + lg.cfg.season).rounds)}` : `⭐ Champions`;
     const lines = d.m.map((m, i) => {
@@ -493,7 +494,24 @@ async function cupCeremony(lg, chat) {
   const meets = [];
   for (let x = 0; x < H.length; x++) for (let y = x + 1; y < H.length; y++) { const r = E.cupMeetRound(H[x].k, H[y].k); if (r > 0) meets.push(`🔮 ${nick(lg, H[x].t)} y ${nick(lg, H[y].t)} se cruzarían en <b>${esc(E.cupRoundName(r, R))}</b>.`); }
   await send(chat, `📋 <b>CUADRO DE LA COPA</b>\n\n${b.first.map(([h, a]) => h == null || a == null ? (h ?? a) == null ? '' : `• ${whoAny(lg, h ?? a, eu)} (pasa)` : `• ${whoAny(lg, h, eu)} 🆚 ${whoAny(lg, a, eu)}`).filter(Boolean).join('\n')}\n\n${meets.slice(0, 6).join('\n')}${meets.length ? '\n' : ''}🏆 ${esc(E.cupRoundName(0, R))}: ${dayName(cupAtR(lg, 0))} a las ${hhmm(cupAtR(lg, 0))}.\n${SITE}`);
+  await sendCuadro(lg, chat, '📋 <b>El cuadro de la Copa</b>');
 }
+// imagen del cuadro de la copa (con los ganadores de las rondas ya jugadas)
+function cuadroData(lg) {
+  const S = lg.cfg.season, b = E.cupBracket(lg.cfg.n, lg.cfg.seed + ':' + S), now = Date.now(), rounds = [];
+  const tm = (i, win) => { if (i == null) return null; const t = teamsArr(lg)[i] || {}, h = isHuman(lg, i); return { name: t.name || 'Equipo', colors: t.colors, human: h, nick: h ? (mgr(lg, i) || '') : '', win }; };
+  const fecha = t => new Date(t).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', timeZone: TZ }) + ' · ' + hhmm(t);
+  let entrants = null, champ = null;
+  for (let r = 0; r < b.rounds; r++) {
+    const pairs = r === 0 ? b.first : []; if (r > 0) for (let i = 0; i < entrants.length; i += 2) pairs.push([entrants[i], entrants[i + 1]]);
+    const doc = lg.cup['s' + S + '-r' + r], done = doc && doc.fin && now >= doc.at + LIVE;
+    const winners = pairs.map(([h, a]) => { if (h == null && a == null) return null; if (h == null) return a; if (a == null) return h; if (!done || h === undefined || a === undefined) return undefined; const k = (doc.pairs || []).findIndex(p => p[0] === h && p[1] === a); return k >= 0 ? E.cupWinner(doc, k) : undefined; });
+    rounds.push({ name: E.cupRoundName(r, b.rounds), date: fecha(doc ? doc.at : cupAtR(lg, r)), matches: pairs.map(([h, a], k) => [h === undefined ? null : tm(h, winners[k] === undefined ? undefined : winners[k] === h), a === undefined ? null : tm(a, winners[k] === undefined ? undefined : winners[k] === a)]) });
+    entrants = winners; if (r === b.rounds - 1 && winners[0] != null && winners[0] !== undefined) champ = winners[0];
+  }
+  return { titulo: 'CUADRO DE LA COPA', sub: (lg.cfg.name || 'LIGA DE AMIGOS').toUpperCase() + ' · TEMPORADA ' + S, rounds, pie: champ != null ? 'Campeón: ' + (teamsArr(lg)[champ]?.name || '') : 'Eliminatorias a partido único · empate = penaltis' };
+}
+async function sendCuadro(lg, chat, caption) { try { const buf = await renderNews('cuadro', cuadroData(lg)); await sendPhoto(chat, buf, caption); } catch (e) { console.warn('cuadro', e.message); } }
 const cupAtR = (lg, r) => { const R = cupRounds(lg), T = total(lg), step = 4 * R <= T - 3 ? 4 : 2; return dayAt(lg, Math.min(T, 4 + step * r)); };
 const running = {};
 function drawTick(lg, chat, now) {
