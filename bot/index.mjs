@@ -105,6 +105,17 @@ function watch(code) {
   col('sobres', q => q.docChanges().forEach(ch => { if (ch.type === 'added') packNews(lg, ch.doc.id, dec(ch.doc.data())); }));
   col('ruleta', q => q.docChanges().forEach(ch => { if (ch.type === 'added') rulNews(lg, ch.doc.id, dec(ch.doc.data())); }));
   col('miembros', q => q.docs.forEach(d => { lg.mem[d.id] = d.data(); }));
+  // anuncios: texto (HTML de Telegram) y hasta 10 fotos por URL pública → álbum con el texto en la primera foto
+  col('anuncios', q => q.docChanges().forEach(ch => {
+    if (ch.type !== 'added') return; const p = dec(ch.doc.data()); if (!p || !p.t || p.t < lg.boot - 60000 || !p.txt) return;
+    const imgs = Array.isArray(p.imgs) ? p.imgs.filter(u => /^https:\/\//.test(String(u))).slice(0, 10) : [];
+    once(code + ':ann:' + ch.doc.id, async () => {
+      if (!imgs.length) return send(chatOf(code), String(p.txt).slice(0, 4000));
+      const cap = String(p.txt).slice(0, 1000);
+      const r = await tg('sendMediaGroup', { chat_id: chatOf(code), media: imgs.map((u, i) => ({ type: 'photo', media: u, ...(i === 0 ? { caption: cap, parse_mode: 'HTML' } : {}) })) });
+      if (!r || !r.ok) send(chatOf(code), cap);
+    });
+  }));
   // encuestas: un doc nuevo en encuestas/ se publica como encuesta de Telegram (pregunta + 2-10 opciones)
   col('encuestas', q => q.docChanges().forEach(ch => {
     if (ch.type !== 'added') return; const p = dec(ch.doc.data()); if (!p || !p.t || p.t < lg.boot - 60000 || !p.q || !Array.isArray(p.ops)) return;

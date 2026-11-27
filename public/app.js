@@ -1392,7 +1392,7 @@ function modal() {
     let v = '3d'; try { v = localStorage.getItem('mv-view') || '3d'; } catch (e) {}
     inner = `<h2>Partido amistoso</h2><p class="mute">Se simula al momento con tu alineación y tu táctica guardadas. No cuenta para la liga, no cansa ni lesiona a nadie, y no lo ve nadie más.</p>
     <label class="f">Rival<select id="f-rival">${D.teams.filter(t => t.id !== D.my.id).map(t => `<option value="${t.idx}">${esc(t.name)}${t.owner ? '' : ' (IA)'}</option>`).join('')}</select></label>
-    <div class="fields" style="margin:12px 0"><label class="f">Vista<select id="f-view"><option value="3d" ${v === '3d' ? 'selected' : ''}>3D estadio</option><option value="2d" ${v === '2d' ? 'selected' : ''}>2D campo</option></select></label>
+    <div class="fields" style="margin:12px 0"><label class="f">Vista<select id="f-view"><option value="3d" ${v === '3d' ? 'selected' : ''}>3D (palco)</option><option value="2d" ${v === '2d' ? 'selected' : ''}>2D campo</option></select></label>
     <label class="f">Ritmo<select id="f-speed"><option value="1">Ritmo de directo (${Math.round(LIVE / 60000)} min)</option><option value="4">Rápido x4 (${Math.round(LIVE / 240000)} min)</option><option value="h">Solo las jugadas</option></select></label></div>
     <button class="btn y" data-act="playfriendly">${IC.play}Jugar amistoso</button>`;
   }
@@ -1604,7 +1604,7 @@ function openViewer(opts) {
   ov.querySelector('.mvx').addEventListener('click', closeViewer);
   const stad = opts.H ? E.stLvl(opts.H) : 3, f0 = opts.match && opts.match.fin && opts.match.fin[0], fill = f0 && f0.att ? f0.att / E.STADIUM[stad].cap : .6;
   const onPalco = !(S.flags && S.flags.palco === false) && opts.match && window.postMessage ? r => openPalco(opts, r) : null;
-  VW = window.MV.mount(ov.querySelector('.mvroot'), { stad, fill, ...opts, crest, esc, league: S.cfg.name, onPalco }); VW.el = ov; if (opts.after) opts.after(VW);
+  VW = window.MV.mount(ov.querySelector('.mvroot'), { stad, fill, ...opts, crest, esc, league: S.cfg.name, onPalco, old3d: !!(S.flags && S.flags.old3d) }); VW.el = ov; if (opts.after) opts.after(VW);
   ov.addEventListener('keydown', e => trapTab(e, ov)); ov.querySelector('.mvx').focus();
 }
 function closeViewer(silent) { closePalco(); if (!VW) return; VW.destroy(); VW.el.remove(); VW = null; document.body.style.overflow = ''; if (silent === true) return; render(); const back = opener && opener.id ? document.getElementById(opener.id) : null; (back || document.querySelector('nav.tabs [aria-current=true]'))?.focus(); }

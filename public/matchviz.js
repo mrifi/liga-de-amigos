@@ -1127,7 +1127,7 @@
     root.innerHTML = `<div class="mv">
       <div class="mv-top"><div class="mv-t">${o.crest(o.H, 36)}<b>${esc(o.H.short)}</b></div><div class="mv-sc"><span class="mv-score">0-0</span><span class="mv-clk">0'</span></div><div class="mv-t r"><b>${esc(o.A.short)}</b>${o.crest(o.A, 36)}</div></div>
       <div class="mv-stage"><div class="mv-r2"></div><div class="mv-r3"></div><div class="mv-flash"></div><div class="mv-ban" aria-live="polite"></div><div class="mv-load" style="display:none">Cargando estadio 3D…</div>
-        <div class="mv-tools"><div class="seg"><button data-v="2d">2D</button><button data-v="3d">3D</button>${o.onPalco ? '<button data-pal="1" class="mv-pal">Palco</button>' : ''}</div><div class="seg mv-cams"><button data-c="tv">TV</button><button data-c="aerea">Aérea</button><button data-c="jug">Cerca</button></div></div>
+        <div class="mv-tools"><div class="seg"><button data-v="2d">2D</button>${o.old3d || !o.onPalco ? '<button data-v="3d">' + (o.onPalco ? '3D clásico' : '3D') + '</button>' : ''}${o.onPalco ? '<button data-pal="1" class="mv-pal">3D</button>' : ''}</div><div class="seg mv-cams"><button data-c="tv">TV</button><button data-c="aerea">Aérea</button><button data-c="jug">Cerca</button></div></div>
         <div class="mv-comm"></div><div class="mv-end" hidden></div></div>
       <div class="mv-ctrl"></div>
       <div class="mv-tabs">${MG ? '<button data-tab="ges" aria-pressed="true">Gestión</button>' : ''}<button data-tab="nar" aria-pressed="${!MG}">Relato</button><button data-tab="est">Datos</button><button data-tab="ali">Equipos</button></div>
@@ -1158,7 +1158,7 @@
     root.addEventListener('change', keepDraft); root.addEventListener('input', keepDraft);
     root.addEventListener('click', e => {
       const b = e.target.closest('button'); if (!b || !root.contains(b)) return;
-      if (b.dataset.pal && o.onPalco) { try { o.onPalco(r); } catch (err) { console.warn(err); } return; }
+      if (b.dataset.pal && o.onPalco) { try { localStorage.setItem('mv-view', '3d'); } catch (e) { } try { o.onPalco(r); } catch (err) { console.warn(err); } return; }
       if (b.dataset.v) setView(b.dataset.v);
       if (b.dataset.c && r3) { r3.setCam(b.dataset.c); root.querySelectorAll('[data-c]').forEach(x => x.setAttribute('aria-pressed', x === b)); snap = true; }
       if (b.dataset.sp) { speed = +b.dataset.sp; high = false; paused = false; el.ctrl.innerHTML = ctrlHTML(); }
@@ -1320,7 +1320,9 @@
     }
     root.__mv = { get tl() { return tl; }, get m() { return m; }, get r() { return r; }, get mode() { return mode; }, seek(x) { r = x; snap = true; prevR = null; }, setSpeed(x) { speed = x; high = false; } };
     let v0 = view; try { v0 = o.view || localStorage.getItem('mv-view') || '2d'; } catch (e) {}
-    setView(v0 === '3d' ? '3d' : '2d');
+    // el 3D oficial es el palco (estilo bloques); el 3D clásico queda guardado y solo sale con o.old3d
+    if (v0 === '3d' && o.onPalco && !o.old3d) { setView('2d'); setTimeout(() => { if (!dead) try { o.onPalco(r); } catch (e) { console.warn(e); } }, 60); }
+    else setView(v0 === '3d' ? '3d' : '2d');
     raf = requestAnimationFrame(frame);
     return { update(nm2) { m = nm2; tl = build(m); mot = Motion(tl, mot.st); curBan = null; lastPanel = -1; prevR = r; }, destroy() { dead = true; cancelAnimationFrame(raf); SND.quiet(); r2 && r2.destroy(); r3 && r3.destroy(); root.innerHTML = ''; }, get r() { return r; }, seek(x) { if (mode !== 'live') { r = Math.max(0, x); snap = true; prevR = null; } }, hold(on) { paused = !!on; try { SND.quiet(); } catch (e) { } if (el.ctrl) el.ctrl.innerHTML = ctrlHTML(); } };
   }
