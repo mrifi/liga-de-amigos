@@ -1,7 +1,7 @@
 /* Visor de partidos: convierte un resultado simulado en un directo animado (2D y 3D). */
 (function (G) {
   'use strict';
-  const E = G.ENG, FL = 105, FW = 68, LIVE_S = E.LIVE_MS / 1000, PLAY_S = (E.PLAY_MS || E.LIVE_MS) / 1000, HT_S = (E.HT_MS || 0) / 1000, MINS = 94, RH = 45.5 / MINS * PLAY_S;
+  const E = G.ENG, FL = 105, FW = 68, LIVE_S = (E.MATCH_MS || E.LIVE_MS) / 1000, PLAY_S = (E.PLAY_MS || E.LIVE_MS) / 1000, HT_S = (E.HT_MS || 0) / 1000, MINS = 94, RH = 45.5 / MINS * PLAY_S;
   const STD = { POR: [1, 13, 25], LD: [2, 12, 26], LI: [3, 17, 27], DFC: [4, 5, 15, 24], MCD: [6, 16, 28], MC: [8, 14, 18], MCO: [10, 20], ED: [7, 22], EI: [11, 21], DC: [9, 19, 23] };
   const SHOTW = { POR: 0, DFC: .3, LD: .4, LI: .4, MCD: .6, MC: 1.2, MCO: 2.4, ED: 3, EI: 3, DC: 5 };
   const clamp = (x, a, b) => Math.max(a, Math.min(b, x)), lerp = (a, b, f) => a + (b - a) * f;

@@ -89,7 +89,21 @@ const curMin = (doc, now) => E.minAt(now - doc.at);
 // se sortean dos tramos por delante: la animación necesita unos segundos para preparar cada jugada
 const segNeed = (doc, now) => Math.min(MAXSEG, Math.floor((curMin(doc, now) - 1 + 2 * E.SEG) / E.SEG));
 // las semillas en directo van en un documento pequeño aparte (vivo/<colección>_<id>) para no reescribir la jornada entera
-const withVivo = (col, id, d) => { const v = S.vivo[col + '_' + id]; return v && d && d.lv ? { ...d, sl: { ...(d.sl || {}), ...(v.sl || {}) }, pr: { ...(d.pr || {}), ...(v.pr || {}) } } : d; };
+const withVivo = (col, id, d) => { const v = S.vivo[col + '_' + id]; if (!(v && d && d.lv)) return d; const pkraw = {}; for (const f in v) if (f.startsWith('pk_')) pkraw[f] = v[f]; return { ...d, sl: { ...(d.sl || {}), ...(v.sl || {}) }, pr: { ...(d.pr || {}), ...(v.pr || {}) }, pkraw }; };
+/* penaltis en directo: elecciones guardadas en vivo/<col>_<id> como pk_<partido>_<lanzamiento>_<s|d> = { v, t, by } */
+const pkStartAt = (at0, i) => at0 + E.PK_INTRO + i * E.PK_MS;
+function pkPicksOf(doc, k) {
+  const out = {}, pre = doc.pre[k], at0 = doc.at + E.MATCH_MS, own = [teamByIdx(pre.h), teamByIdx(pre.a)].map(t => t && t.owner);
+  for (const f in doc.pkraw || {}) {
+    const [, kk, ii, role] = f.split('_'); if (+kk !== k) continue; const i = +ii, x = doc.pkraw[f]; if (!x || i >= E.PK_LIVE) continue;
+    const side = i % 2, by = role === 's' ? own[side] : own[1 - side];
+    if (!by || x.by !== by || x.t > pkStartAt(at0, i) + E.PK_CHOOSE + 1500) continue;
+    (out[i] = out[i] || {})[role] = x.v;
+  }
+  return out;
+}
+const pkHere = (doc, k, lv) => { const pr = (lv && lv.pr && lv.pr[MAXSEG]) || [], p = doc.pre[k]; return [pr.includes(p.h), pr.includes(p.a)]; };
+const pkSeed = (doc, k, lv) => doc.pre[k].seed + ':' + lv.sl[MAXSEG];
 const newSalt = () => { try { return [...crypto.getRandomValues(new Uint32Array(2))].map(x => x.toString(36)).join(''); } catch (e) { return Math.random().toString(36).slice(2) + Date.now().toString(36); } };
 const presentTeams = now => Object.entries(S.pres).filter(([, x]) => x && now - x.t < PRES_TTL).map(([k]) => +k.slice(1));
 // semillas que faltan hasta el tramo `upto`; la presencia solo cuenta para tramos que aún no se han jugado
@@ -101,7 +115,7 @@ function moreSalts(doc, upto, now) {
 function lvOf(doc, now) {
   const sl = { ...(doc.sl || {}) };
   // si nadie estaba conectado durante el partido, los tramos sin sortear se cierran con una semilla fija al acabar
-  if (now >= doc.at + LIVE) for (let i = 0; i <= MAXSEG; i++) if (sl[i] == null) sl[i] = 'z' + i;
+  if (now >= doc.at + E.MATCH_MS) for (let i = 0; i <= MAXSEG; i++) if (sl[i] == null) sl[i] = 'z' + i;
   return { sl, pr: doc.pr || {} };
 }
 function resolveDoc(doc, col) {
@@ -117,21 +131,21 @@ function resolveDoc(doc, col) {
   });
   if (!changed) return doc;
   const out = { ...doc, m };
-  if (lv && (col !== 'jor' || (doc.at || 0) >= E.PENS_FROM)) out.pens = m.map((x, k) => x.part == null && x.hg === x.ag ? E.penaltyShootout(doc.pre[k].seed + ':' + lv.sl[MAXSEG]) : null);
+  if (lv && (col !== 'jor' || (doc.at || 0) >= E.PENS_FROM)) out.pens = m.map((x, k) => x.part == null && x.hg === x.ag ? ((doc.at || 0) >= E.PENS_FROM ? E.shootout(doc.pre[k], x, pkSeed(doc, k, lv), pkPicksOf(doc, k), pkHere(doc, k, lv)).score : E.penaltyShootout(doc.pre[k].seed + ':' + lv.sl[MAXSEG])) : null);
   return out;
 }
 const liveDocs = () => [...Object.entries(S.jor).map(([id, d]) => ['jornadas', id, withVivo('jornadas', id, d)]), ...Object.entries(S.cupRaw).map(([id, d]) => ['copa', id, withVivo('copa', id, d)]), ...Object.entries(S.clRaw).map(([id, d]) => ['champions', id, withVivo('champions', id, d)])];
 let liveBusy = false;
 async function liveTick() {
   if (liveBusy || !S.db || !S.canWrite) return;
-  const now = Date.now(), todo = liveDocs().filter(([, , d]) => d.lv && !d.fin && now >= d.at && now < d.at + LIVE - 4000 && moreSalts(d, segNeed(d, now), now));
+  const now = Date.now(), todo = liveDocs().filter(([, , d]) => d.lv && !d.fin && now >= d.at && now < d.at + E.MATCH_MS - 2000 && moreSalts(d, segNeed(d, now), now));
   if (!todo.length) return;
   liveBusy = true;
   try {
     for (const [col, id, d] of todo) {
       const ref = S.db.doc('vivo/' + col + '_' + id), l = await ref.acquire({ holder: S.me || 'anon', ttlMs: 6000 }); if (!l.acquired) continue;
       const v = (await ref.get()).data() || {}, cur = { ...d, sl: { ...(d.sl || {}), ...(v.sl || {}) }, pr: { ...(d.pr || {}), ...(v.pr || {}) } };
-      const t = Date.now(), add = moreSalts(cur, segNeed(cur, t), t); if (add) { await ref.set(add); S.vivo[col + '_' + id] = add; }
+      const t = Date.now(), add = moreSalts(cur, segNeed(cur, t), t); if (add) { await ref.update(add); S.vivo[col + '_' + id] = { ...(S.vivo[col + '_' + id] || {}), ...add }; }
     }
   } catch (e) { console.warn('live', e); } finally { liveBusy = false; }
 }
@@ -976,6 +990,12 @@ function liveCompHTML() {
       out.push(`<section class="panel livecomp"><div class="ph"><h3><span class="lvdot"></span> ${name} en directo</h3></div><div class="mrow mine" style="cursor:default"><span class="h"><span>${esc(H.name)}</span>${crest(H, 24)}</span><span class="sc lv">${x}-${y}</span><span class="a">${crest(A, 24)}<span>${esc(A.name)}</span></span></div><div class="acts"><button class="btn y" data-act="${act}" data-arg="${id.split('-r')[1]}-${i}">Ver en directo</button></div></section>`);
     }
   }
+  for (const [cc, store] of Object.entries(PK_RAW())) for (const id in store || {}) {
+    const d = store[id]; if (!d || !d.pre || !d.lv || (d.at || 0) < E.PENS_FROM || now < d.at + E.MATCH_MS || now >= d.at + LIVE) continue;
+    const r = resolveDoc(withVivo(PK_COL[cc], id, d), cc), k = r.m.findIndex(m => m && m.part == null && m.hg === m.ag && (m.h === D.myIdx || m.a === D.myIdx)); if (k < 0) continue;
+    const m = r.m[k], H = teamByIdx(m.h), A = teamByIdx(m.a);
+    out.unshift(`<section class="panel livecomp"><div class="ph"><h3><span class="lvdot"></span> ¡Penaltis en directo!</h3></div><div class="mrow mine" style="cursor:default"><span class="h"><span>${esc(H.name)}</span>${crest(H, 24)}</span><span class="sc lv">${m.hg}-${m.ag}</span><span class="a">${crest(A, 24)}<span>${esc(A.name)}</span></span></div><div class="acts"><button class="btn y" data-act="pkopen" data-arg="${cc}|${id}|${k}">Entrar a la tanda</button></div></section>`);
+  }
   return out.join('');
 }
 function homeView() {
@@ -1401,12 +1421,13 @@ function endSummary(kind, doc, extra) {
   return m => {
     const H = teamByIdx(m.h), A = teamByIdx(m.a), my = D && D.my ? D.myIdx : -1, side = m.h === my ? 0 : m.a === my ? 1 : -1;
     const me = side < 0 ? null : side ? m.ag : m.hg, op = side < 0 ? null : side ? m.hg : m.ag;
-    let pens = extra && extra.pens; const res = side < 0 ? 'Final' : me > op ? '¡Victoria!' : me < op ? (pens && (side ? pens[1] > pens[0] : pens[0] > pens[1]) ? '¡Pasáis por penaltis!' : 'Derrota') : pens ? ((side ? pens[1] > pens[0] : pens[0] > pens[1]) ? (kind === 'league' ? '¡Ganáis en los penaltis!' : '¡Pasáis por penaltis!') : (kind === 'league' ? 'Perdéis en los penaltis' : 'Fuera por penaltis')) : 'Empate';
+    let pens = extra && extra.pens; if (m.hg === m.ag && !pens && doc && (doc.at || 0) >= E.PENS_FROM && Date.now() < doc.at + LIVE) return `<h3 class="mv-endt">Empate</h3><div class="mv-ends">${crest(teamByIdx(m.h), 40)}<b>${m.hg}-${m.ag}</b>${crest(teamByIdx(m.a), 40)}</div><p class="mv-endp">¡Se decide en los penaltis! La tanda empieza ahora.</p>`;
+    const res = side < 0 ? 'Final' : me > op ? '¡Victoria!' : me < op ? (pens && (side ? pens[1] > pens[0] : pens[0] > pens[1]) ? '¡Pasáis por penaltis!' : 'Derrota') : pens ? ((side ? pens[1] > pens[0] : pens[0] > pens[1]) ? (kind === 'league' ? '¡Ganáis en los penaltis!' : '¡Pasáis por penaltis!') : (kind === 'league' ? 'Perdéis en los penaltis' : 'Fuera por penaltis')) : 'Empate';
     const mvp = m.mvp ? E.player(m.mvp) : null, rt = m.mvp && m.rat ? m.rat[m.mvp] : null;
     const lg = kind === 'cup' ? 'copa' : kind === 'cl' ? 'champions' : kind === 'league' ? 'liga' : null;
     let h = `${lg ? `<div class="mv-endl0">${compLogo(lg, 52)}</div>` : ''}<h3 class="mv-endt">${res}</h3><div class="mv-ends">${crest(H, 40)}<b>${m.hg}-${m.ag}</b>${crest(A, 40)}</div>${pens ? `<p class="mv-endp">Penaltis ${pens[0]}-${pens[1]}</p>` : ''}`;
     if (mvp) h += `<p class="mv-endp">Mejor jugador: <b>${esc(mvp.name)}</b>${rt ? ` · ${(+rt).toFixed(1)}` : ''}</p>`;
-    if (kind === 'friendly') return h + `<p class="mv-endn">Amistoso: no da dinero, tokens ni aficionados. Sirve para probar alineaciones y tácticas.</p>`;
+    if (kind === 'friendly') { if (S.fr) S.fr.m = m; return h + (m.hg === m.ag && S.fr ? `<div class="mv-endpk"><button class="btn y" data-act="pkfriendly">¡A penaltis! Chuta y para tú</button></div>` : '') + `<p class="mv-endn">Amistoso: no da dinero, tokens ni aficionados. Sirve para probar alineaciones y tácticas.</p>`; }
     if (side < 0) return h;
     if (kind === 'cup') return h + `<p class="mv-endn">En la copa no hay taquilla ni tokens: el campeón se lleva ${money(12)} y el finalista ${money(5)}.</p>`;
     if (kind === 'cl') { const won = me > op || (pens && (side ? pens[1] > pens[0] : pens[0] > pens[1])); return h + (extra && extra.final ? `<p class="mv-endn">${won ? `¡Campeones de la Champions! +${money(CL_PRIZE.champ + CL_PRIZE.win)} y +${CL_TOK.champ + CL_TOK.win} tokens.` : `Subcampeones: +${money(CL_PRIZE.final)}.`}</p>` : `<div class="mv-endk"><span>${IC.gem}<b>+${won ? CL_TOK.win : 0}</b> tokens</span><span><b class="pos-amt">+${money(won ? CL_PRIZE.win : 0)}</b> premio</span></div>`); }
@@ -1486,6 +1507,94 @@ function openPalco(opts, r) {
   addEventListener('message', on);
   el.querySelector('.palco-x').addEventListener('click', () => closePalco());
 }
+/* ---------- tanda de penaltis (en directo o en amistoso) ---------- */
+const PK_COL = { jor: 'jornadas', cup: 'copa', cl: 'champions' }, PK_RAW = () => ({ jor: S.jor, cup: S.cupRaw, cl: S.clRaw });
+let PK = null; const pkSeen = {};
+function pkLiveState(o) {
+  const raw = PK_RAW()[o.cc][o.id]; if (!raw) return null;
+  const d = withVivo(PK_COL[o.cc], o.id, raw), lv = lvOf(d, Date.now()), r = resolveDoc(d, o.cc), m = r.m[o.k];
+  const picks = pkPicksOf(d, o.k); for (const i in o.mine) picks[i] = { ...(picks[i] || {}), ...o.mine[i] };
+  return { m, res: E.shootout(d.pre[o.k], m, pkSeed(d, o.k, lv), picks, pkHere(d, o.k, lv)) };
+}
+function pkOpen(o) {
+  if (PK) pkClose();
+  const el = document.createElement('div'); el.className = 'pk-ov'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', 'Tanda de penaltis');
+  const H = o.H, A = o.A;
+  el.innerHTML = `<div class="pk-box"><button class="pk-x" aria-label="Cerrar">${IC.x}</button>
+  <div class="pk-head"><div class="pk-t">${crest(H, 34)}<b>${esc(H.short || H.name)}</b></div><div class="pk-sc">0 - 0</div><div class="pk-t r"><b>${esc(A.short || A.name)}</b>${crest(A, 34)}</div></div>
+  <div class="pk-dots"><div class="pk-d0"></div><div class="pk-d1"></div></div>
+  <div class="pk-title">Tanda de penaltis</div>
+  <div class="pk-stage"><div class="pk-goal">${[0, 1, 2, 3, 4, 5].map(z => `<button class="pk-z" data-z="${z}" aria-label="Chutar a la zona ${z + 1}" disabled></button>`).join('')}<div class="pk-gk"></div><div class="pk-ball"></div></div></div>
+  <div class="pk-who"></div><div class="pk-ctl"></div><div class="pk-msg" aria-live="polite"></div></div>`;
+  document.body.appendChild(el);
+  PK = { ...o, el, mine: {}, last: -1 };
+  el.querySelector('.pk-x').addEventListener('click', pkClose);
+  el.querySelectorAll('.pk-z').forEach(b => b.addEventListener('click', () => pkPick('s', +b.dataset.z)));
+  el.querySelector('.pk-ctl').addEventListener('click', e => { const b = e.target.closest('[data-dv]'); if (b) pkPick('d', +b.dataset.dv); });
+  PK.timer = setInterval(pkRender, 200); pkRender();
+}
+function pkClose() { if (!PK) return; clearInterval(PK.timer); PK.el.remove(); PK = null; }
+function pkPhase(now) {
+  const t = now - PK.at0 - E.PK_INTRO; if (t < 0) return { intro: true, left: Math.ceil(-t / 1000) };
+  const cur = Math.floor(t / E.PK_MS), e = t - cur * E.PK_MS; return { cur, choosing: cur < E.PK_LIVE && e < E.PK_CHOOSE, left: Math.ceil((E.PK_CHOOSE - e) / 1000) };
+}
+function pkPick(role, v) {
+  if (!PK) return; const ph = pkPhase(Date.now()); if (ph.intro || !ph.choosing) return;
+  const i = ph.cur, s = i % 2, mine = PK.mySide; if ((role === 's' && mine !== s) || (role === 'd' && mine !== 1 - s)) return;
+  if (PK.mine[i] && PK.mine[i][role] != null) return;
+  (PK.mine[i] = PK.mine[i] || {})[role] = v;
+  if (PK.mode === 'local') (PK.local[i] = PK.local[i] || {})[role] = v;
+  else S.db.doc('vivo/' + PK_COL[PK.cc] + '_' + PK.id).update({ ['pk_' + PK.k + '_' + i + '_' + role]: { v, t: Date.now(), by: S.me } }).catch(e => { console.warn(e); toast('No se ha podido enviar tu elección'); });
+  pkRender();
+}
+const PK_RES = { gol: '¡GOL!', parada: '¡PARADA!', fuera: '¡FUERA!', palo: '¡AL PALO!' };
+function pkRender() {
+  if (!PK) return; const now = Date.now(), el = PK.el;
+  const st = PK.mode === 'local' ? { res: E.shootout(PK.pre, PK.m, PK.seed, PK.local, PK.here) } : pkLiveState(PK); if (!st) return;
+  const K = st.res.kicks, ph = pkPhase(now), H = PK.H, A = PK.A, nm = id => esc(E.player(id).name.split(' ').slice(-1)[0]);
+  const shown = ph.intro ? 0 : ph.cur >= E.PK_LIVE ? K.length : Math.min(K.length, ph.cur + (ph.choosing ? 0 : 1));
+  const sc = shown ? K[shown - 1].sc : [0, 0], done = shown >= K.length;
+  el.querySelector('.pk-sc').textContent = `${sc[0]} - ${sc[1]}`;
+  [0, 1].forEach(s => { const mine = K.slice(0, shown).filter(k => k.s === s); const n = Math.max(5, mine.length + (done ? 0 : 1)); el.querySelector('.pk-d' + s).innerHTML = [...Array(n)].map((_, j) => { const k = mine[j]; return `<i class="${k ? (k.res === 'gol' ? 'ok' : 'ko') : ''}"></i>`; }).join(''); });
+  const gk = el.querySelector('.pk-gk'), ball = el.querySelector('.pk-ball'), who = el.querySelector('.pk-who'), ctl = el.querySelector('.pk-ctl'), msg = el.querySelector('.pk-msg'), zs = el.querySelectorAll('.pk-z');
+  const setZ = on => zs.forEach(b => { b.disabled = !on; b.classList.toggle('on', !!on); });
+  if (done) {
+    const w = sc[0] > sc[1] ? H : A; setZ(false); ctl.innerHTML = '';
+    who.innerHTML = ''; msg.innerHTML = `<b>${esc(w.name)}</b> gana ${Math.max(...sc)}-${Math.min(...sc)} en los penaltis`;
+    el.querySelector('.pk-title').textContent = 'Final de la tanda'; return;
+  }
+  if (ph.intro) { setZ(false); who.textContent = ''; ctl.innerHTML = ''; msg.innerHTML = `Empate. ¡Penaltis en <b>${ph.left}</b>!`; gk.className = 'pk-gk'; ball.className = 'pk-ball'; return; }
+  const i = Math.min(ph.cur, K.length - 1), k = K[i], s = k.s, side = PK.mySide, shoot = side === s, keep = side === 1 - s, T = s ? A : H, O = s ? H : A;
+  who.innerHTML = `Chuta <b>${nm(k.p)}</b> (${esc(T.short || T.name)}) · Para <b>${nm(k.g)}</b>`;
+  if (ph.choosing) {
+    gk.className = 'pk-gk'; ball.className = 'pk-ball'; msg.textContent = '';
+    const picked = PK.mine[i] || {};
+    if (shoot) { setZ(picked.s == null); ctl.innerHTML = picked.s == null ? `<div class="pk-cd">${ph.left}</div><p>Toca dónde quieres chutar. Si no eliges, chutas mal.</p>` : `<p>Elegido. Esperando al portero…</p>`; }
+    else if (keep) { setZ(false); ctl.innerHTML = picked.d == null ? `<div class="pk-cd">${ph.left}</div><div class="pk-dv"><button class="btn" data-dv="0">⟵ Izq.</button><button class="btn" data-dv="1">Centro</button><button class="btn" data-dv="2">Der. ⟶</button></div>` : `<p>Elegido. Esperando el disparo…</p>`; }
+    else { setZ(false); ctl.innerHTML = `<div class="pk-cd">${ph.left}</div>`; }
+  } else {
+    setZ(false); ctl.innerHTML = '';
+    gk.className = 'pk-gk d' + k.d; ball.className = 'pk-ball z' + k.z + ' ' + k.res;
+    msg.innerHTML = `<b class="pk-r ${k.res}">${PK_RES[k.res]}</b>${k.bad ? ' · tiro sin elegir' : ''}`;
+    if (PK.last !== i) { PK.last = i; try { navigator.vibrate && navigator.vibrate(k.res === 'gol' ? 60 : [40, 40, 40]); } catch (e) { } }
+  }
+}
+function pkCheck() {
+  if (PK || !D || document.visibilityState !== 'visible') return; const now = Date.now();
+  for (const [cc, store] of Object.entries(PK_RAW())) for (const id in store || {}) {
+    const d = store[id]; if (!d || !d.pre || !d.lv || (d.at || 0) < E.PENS_FROM || now < d.at + E.MATCH_MS || now >= d.at + LIVE) continue;
+    const r = resolveDoc(withVivo(PK_COL[cc], id, d), cc);
+    r.m.forEach((m, k) => {
+      if (PK || m.part != null || m.hg !== m.ag) return; const key = cc + id + k; if (pkSeen[key]) return;
+      const mine = D.myIdx >= 0 && (m.h === D.myIdx || m.a === D.myIdx), watching = VW && VW.key && VW.key.col === cc && VW.key.id === id && VW.key.k === k;
+      if (!mine && !watching) return; pkSeen[key] = 1; pkOpenLive(cc, id, k);
+    });
+  }
+}
+function pkOpenLive(cc, id, k) {
+  const d = PK_RAW()[cc][id]; if (!d) return; const p = d.pre[k];
+  pkOpen({ mode: 'live', cc, id, k, at0: d.at + E.MATCH_MS, H: teamByIdx(p.h), A: teamByIdx(p.a), mySide: D.myIdx === p.h ? 0 : D.myIdx === p.a ? 1 : -1 });
+}
 function openViewer(opts) {
   opener = document.activeElement; closeViewer(true);
   const ov = document.createElement('div'); ov.className = 'mvov'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true');
@@ -1563,6 +1672,8 @@ function ask(title, text, ok, fn, danger) { S.modal = { type: 'confirm', title, 
 const ACT = {
   view: v => { S.view = v; S.sel = null; S.modal = null; render(); window.scrollTo(0, 0); },
   ciudad: () => openCity(),
+  pkopen: a => { const [cc, id, k] = a.split('|'); pkOpenLive(cc, id, +k); },
+  pkfriendly: () => { const f = S.fr; if (!f || !f.m) return; pkOpen({ mode: 'local', pre: f.pre, m: f.m, seed: 'am' + Date.now(), local: {}, here: [true, false], at0: Date.now() - E.PK_INTRO + 2500, H: teamByIdx(f.m.h), A: teamByIdx(f.m.a), mySide: 0 }); },
   go: a => { const [v, s] = a.split(':'); S.view = v; if (v === 'equipo') S.sub = s; if (v === 'liga') S.lsub = s; if (v === 'mercado') S.msub = s; if (v === 'club') S.csub = s; render(); window.scrollTo(0, 0); },
   sub: v => { S.sub = v; S.sel = null; render(); }, lsub: v => { S.lsub = v; render(); }, msub: v => { S.msub = v; render(); },
   md: v => { S.mdSel = Math.max(1, Math.min(D.total, +v)); render(); },
@@ -1584,7 +1695,7 @@ const ACT = {
   rulspin: (a, el) => { if (el.getAttribute('aria-disabled') === 'true') { const st = rulState(D.my); return toast(a === 'free' ? 'La tirada gratis vuelve mañana' : st.paid >= RUL_MAXPAID ? 'Ya no quedan tiradas extra hoy' : S.modal?.phase === 'spin' ? 'Espera a que pare' : 'No tienes tokens suficientes'); } rulSpin(a); },
   rulok: () => { S.modal = { type: 'ruleta', phase: 'idle' }; render(); },
   noticia: id => { S.modal = { type: 'noticia', id }; render(); },
-  playfriendly: () => { const rival = +$('#f-rival').value, view = $('#f-view').value, sp = $('#f-speed').value; const fr = E.simulateFriendly(S.cfg, D.teams, D.myIdx, rival, D.Sx, D.cur, Date.now() + ':' + Math.random()), ords = []; const m = fr.m; try { localStorage.setItem('mv-view', view); } catch (e) {} S.modal = null; render(); const manage = { side: 0, bench: fr.pre.side[0].bench, onOrder: o => { ords.push({ ...o, s: 0, t: Date.now() }); VW && VW.update(E.resultFromPre(fr.pre, ords)); toast(o.k === 'sub' ? 'Cambio hecho' : 'Táctica cambiada'); } }; openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), live: null, view, speed: sp === 'h' ? 4 : +sp, highlights: sp === 'h', summary: endSummary('friendly'), manage }); },
+  playfriendly: () => { const rival = +$('#f-rival').value, view = $('#f-view').value, sp = $('#f-speed').value; const fr = E.simulateFriendly(S.cfg, D.teams, D.myIdx, rival, D.Sx, D.cur, Date.now() + ':' + Math.random()), ords = []; const m = fr.m; S.fr = { pre: fr.pre, m }; try { localStorage.setItem('mv-view', view); } catch (e) {} S.modal = null; render(); const manage = { side: 0, bench: fr.pre.side[0].bench, onOrder: o => { ords.push({ ...o, s: 0, t: Date.now() }); VW && VW.update(E.resultFromPre(fr.pre, ords)); toast(o.k === 'sub' ? 'Cambio hecho' : 'Táctica cambiada'); } }; openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), live: null, view, speed: sp === 'h' ? 4 : +sp, highlights: sp === 'h', summary: endSummary('friendly'), manage }); },
   close: () => { const m = S.modal; if (m && m.type === 'ruleta' && m.phase === 'spin') { S.rulRot = m.to % 360; toast('Te ha tocado: ' + RUL[m.win].n); } S.modal = null; S.rp = null; render(); },
   tuto: i => { S.modal = { type: 'tuto', i: +i }; render(); document.querySelector('.tuto-card .btn.y')?.focus(); },
   tutoend: to => { S.modal = null; if (D.my && !D.my.tuto) saveTeam(D.my.id, { tuto: 1 }); if (to === 'club') { S.view = 'club'; S.csub = 'club'; } render(); window.scrollTo(0, 0); },
@@ -1667,6 +1778,7 @@ function liveSig() {
 }
 setInterval(() => {
   document.querySelectorAll('[data-cd]').forEach(el => el.textContent = cdText(+el.dataset.cd));
+  try { pkCheck(); } catch (e) { console.warn('pk', e); }
   const [st, mins, due] = liveSig();
   if (st + due !== S.sig) { S.sig = st + due; derive(); render(); tick(); return; }
   if (mins !== S.sigM) { S.sigM = mins; if (S.view === 'inicio' || S.modal?.type === 'match' || (S.view === 'liga' && S.lsub === 'jornadas')) render(); }

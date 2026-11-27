@@ -1,7 +1,7 @@
 /* Motor del juego: lógica pura, sin DOM. Todo es determinista a partir de semillas. */
 (function (G) {
   'use strict';
-  const SEG = 3, HOME_P = .03, PRES_P = .08, DAY = 86400000, PLAY_MS = 8 * 60000, HT_MS = 40000, LIVE_MS = PLAY_MS + HT_MS, BASE_YEAR = 2026, START_CASH = 40, TICKET = 45;
+  const SEG = 3, HOME_P = .03, PRES_P = .08, DAY = 86400000, PLAY_MS = 8 * 60000, HT_MS = 40000, MATCH_MS = PLAY_MS + HT_MS, PK_INTRO = 5000, PK_MS = 11000, PK_CHOOSE = 8000, PK_LIVE = 14, PEN_MS = PK_INTRO + PK_LIVE * PK_MS, LIVE_MS = MATCH_MS + PEN_MS, BASE_YEAR = 2026, START_CASH = 40, TICKET = 45;
   const PRIZE = { w: 1.0, d: 0.45, l: 0.15 };
   // el club empieza en un campo municipal y crece con su afición (estilo Top Eleven)
   const STADIUM = [
@@ -668,6 +668,49 @@
     if (h === a) h++;
     return [h, a];
   }
+  /* ---------- tanda de penaltis en directo ----------
+     Chuta el local primero. 5 por equipo y muerte súbita; los 14 primeros lanzamientos son en directo (9 s cada uno:
+     8 para elegir). Elecciones: shot = zona 0-5 (0-2 arriba izq/centro/der, 3-5 abajo), 'bad' (conectado sin elegir) o null (IA);
+     dive = 0 izq, 1 centro, 2 der, o null (IA). Mismas elecciones + misma semilla = mismo resultado en todos los móviles. */
+  function penSides(pre, m) {
+    return [0, 1].map(s => {
+      const sd = pre.side[s], on = new Set((sd.xi || []).filter(Boolean)), rate = id => (sd.p && sd.p[id] ? sd.p[id][0] : ovr(id, 1, 0));
+      for (const e of m.ev || []) { if (e.s !== s) continue; if (e.t === 'cam') { on.delete(e.q); on.add(e.p); } else if (e.t === 'roja') on.delete(e.p); }
+      const ids = [...on], A = id => attrs(id, rate(id));
+      let gk = ids.filter(id => player(id).pos === 'POR').sort((x, y) => A(y).por - A(x).por)[0] || ids.slice().sort((x, y) => A(y).por - A(x).por)[0];
+      const takers = ids.filter(id => id !== gk).sort((x, y) => A(y).tir - A(x).tir || rate(y) - rate(x));
+      return { gk, gkPor: gk ? A(gk).por : 40, takers: takers.length ? takers : [gk], tir: id => A(id).tir };
+    });
+  }
+  const PK_AI_SHOT = [.07, .05, .07, .3, .21, .3], PK_MISS = [.16, .1, .16, .08, .03, .08];
+  function penKick(seed, i, tir, por, shot, dive) {
+    const r = rng('pk' + seed + ':' + i), pickW = w => { let x = r(), k = 0; while (k < w.length - 1 && (x -= w[k]) > 0) k++; return k; };
+    const aiS = shot == null, aiD = dive == null, bad = shot === 'bad';
+    let z = aiS ? pickW(PK_AI_SHOT) : bad ? 4 : clamp(shot | 0, 0, 5); const d = aiD ? pickW([.45, .1, .45]) : clamp(dive | 0, 0, 2);
+    const col = z % 3, high = z < 3, u = r(), v = r();
+    let res;
+    if (bad && u < .65) res = v < .3 ? 'palo' : 'fuera';
+    else if (!bad && u < PK_MISS[z] * (1.25 - tir / 200)) res = v < .35 ? 'palo' : 'fuera';
+    else if (d === col) { const sp = clamp((high ? (col === 1 ? .45 : .36) : (col === 1 ? .72 : .6)) + (por - 75) * .006 - (tir - 75) * .004 + (bad ? .25 : 0), .1, .92); res = v < sp ? 'parada' : 'gol'; }
+    else res = 'gol';
+    return { z, d, res, aiS, aiD, bad };
+  }
+  // picks: { [i]: { s, d } }; here: [bool, bool] = míster conectado al final del partido (sin elegir → mal tiro / portero quieto)
+  function shootout(pre, m, seed, picks, here) {
+    const S = penSides(pre, m), kicks = [], sc = [0, 0], shot = [0, 0], human = [0, 1].map(s => !!(pre.side[s].human)), on = [0, 1].map(s => human[s] && here && here[s]);
+    for (let i = 0; i < 40; i++) {
+      const s = i % 2, o = 1 - s, n = Math.floor(i / 2), taker = S[s].takers[n % S[s].takers.length], pk = (picks && picks[i]) || {}, live = i < PK_LIVE;
+      const sh = live && on[s] ? (pk.s != null ? pk.s : 'bad') : (live && human[s] && pk.s != null ? pk.s : null);
+      const dv = live && on[o] ? (pk.d != null ? pk.d : 1) : (live && human[o] && pk.d != null ? pk.d : null);
+      const k = penKick(seed, i, S[s].tir(taker), S[o].gkPor, sh, dv);
+      if (k.res === 'gol') sc[s]++; shot[s]++;
+      kicks.push({ i, s, p: taker, g: S[o].gk, ...k, sc: [sc[0], sc[1]] });
+      if (i < 10) { const left = [5 - shot[0], 5 - shot[1]]; if (sc[0] + left[0] < sc[1] || sc[1] + left[1] < sc[0]) break; }
+      else if (s === 1 && sc[0] !== sc[1]) break;
+    }
+    if (sc[0] === sc[1]) sc[0]++; // salvaguarda (40 lanzamientos sin decidir: prácticamente imposible)
+    return { kicks, score: sc };
+  }
   function simulateCupRound(cfg, teams, pairs, S, round, at, state, lv) {
     const formOf = () => ({ mor: 1, fill: .6 }), m = [], pens = [], pres = [];
     pairs.forEach(([h, a], k) => {
@@ -701,5 +744,5 @@
   const formProfile = form => { const w = [0, 0, 0], fm = FMOD[form] || [1, 1, 1]; (FORMS[form] || []).forEach(p => W[p].forEach((v, i) => { w[i] += v; })); return w.map((v, i) => Math.pow(v / K[i], .2) * fm[i]); };
   // minuto de partido (1-94) a partir de los ms transcurridos desde el inicio; el descanso se queda en el 45
   const minAt = ms => { const h1 = 45.5 / 94 * PLAY_MS; if (ms < h1) return Math.max(1, Math.min(45, Math.floor(ms / PLAY_MS * 94) + 1)); if (ms < h1 + HT_MS) return 45; return Math.max(46, Math.min(94, Math.floor((ms - HT_MS) / PLAY_MS * 94) + 1)); };
-  G.ENG = { PENS_FROM, pensOf, PLAY_MS, HT_MS, minAt, ESP, espOf, FDESC, formProfile, clDraw, drawTime, cupMeetRound, DRAW_SHOW: 4 * 60000, SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
+  G.ENG = { shootout, penKick, MATCH_MS, PEN_MS, PK_INTRO, PK_MS, PK_CHOOSE, PK_LIVE, PENS_FROM, pensOf, PLAY_MS, HT_MS, minAt, ESP, espOf, FDESC, formProfile, clDraw, drawTime, cupMeetRound, DRAW_SHOW: 4 * 60000, SEG, HOME_P, PRES_P, penaltyShootout, euroClubs, CL_RR, groupTable, stLvl, DAY, LIVE_MS, BASE_YEAR, START_CASH, STADIUM, POS, LINE, FORMS, COORD, TICKET, fit, rng, hash, player, age, ovr, value, wage, pval, pot, fixtures, draft, freeAgents, deriveState, table, prize, makeCtx, resolveLineup, aiLineup, autoXI, lineStrength, simulateMatchday, simulateFriendly, resultFromPre, buildPre, matchIncome, simCore, attrs, ATR, ATR_N, FAC, facLvl, fansOf, ecoOf, sponsorOffers, tokens, adjOf, trainGains, finances, REAL, r1, cupBracket, cupRoundName, simulateCupRound, cupWinner };
 })(typeof window !== 'undefined' ? window : globalThis);
