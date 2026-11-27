@@ -1488,7 +1488,7 @@ function openCity() {
   addEventListener('message', on);
   el.querySelector('.palco-x').addEventListener('click', () => closePalco());
 }
-function closePalco(msg) { if (!PALCO) return; clearTimeout(PALCO.to); removeEventListener('message', PALCO.on); PALCO.el.remove(); PALCO = null; if (msg) toast(msg); VW && VW.el && VW.el.querySelector('.mvx')?.focus(); }
+function closePalco(msg) { if (!PALCO) return; clearTimeout(PALCO.to); removeEventListener('message', PALCO.on); PALCO.el.remove(); PALCO = null; if (VW && VW.hold) VW.hold(false); if (msg) toast(msg); VW && VW.el && VW.el.querySelector('.mvx')?.focus(); }
 function openPalco(opts, r) {
   if (PALCO || !opts.match) return;
   const team = t => ({ name: (t && t.name) || 'Equipo', short: (t && (t.short || (t.name || '').slice(0, 3).toUpperCase())) || 'EQU', colors: (t && t.colors) || ['#1f9d55', '#f2f5ee'] });
@@ -1499,13 +1499,14 @@ function openPalco(opts, r) {
   const on = e => {
     if (e.origin !== location.origin || e.source !== fr.contentWindow || !e.data) return;
     const t = e.data.type;
-    if (t === 'palco-ready') { clearTimeout(PALCO.to); PALCO.ready = true; fr.contentWindow.postMessage({ type: 'palco-match', m: (VW && VW.curM) || opts.match, H: team(opts.H), A: team(opts.A), live: opts.live && Date.now() < opts.live.at + LIVE ? opts.live.at : 0, startR: opts.live || !(r > 20) ? 0 : r }, location.origin); }
-    else if (t === 'palco-close') closePalco();
+    if (t === 'palco-ready') { clearTimeout(PALCO.to); PALCO.ready = true; fr.contentWindow.postMessage({ type: 'palco-match', m: (VW && VW.curM) || opts.match, H: team(opts.H), A: team(opts.A), live: opts.live && Date.now() < opts.live.at + LIVE ? opts.live.at : 0, startR: opts.live || !(r > 3) ? 0 : r }, location.origin); }
+    else if (t === 'palco-close') { const pr = +e.data.r; closePalco(); if (VW && !opts.live && pr > 0) VW.seek(pr); }
     else if (t === 'palco-error') closePalco('El palco no ha podido cargar. Sigues en la vista normal.');
   };
+  if (VW && VW.hold) VW.hold(true);
   PALCO = { el, on, to: setTimeout(() => closePalco('El palco tarda demasiado en cargar. Sigues en la vista normal.'), 45000) };
   addEventListener('message', on);
-  el.querySelector('.palco-x').addEventListener('click', () => closePalco());
+  el.querySelector('.palco-x').addEventListener('click', () => { let pr = 0; try { const c = fr.contentWindow.__city; if (c && c.mode === 'match') pr = c.RM.r; } catch (e) { } closePalco(); if (VW && !opts.live && pr > 0) VW.seek(pr); });
 }
 /* ---------- tanda de penaltis (en directo o en amistoso) ---------- */
 const PK_COL = { jor: 'jornadas', cup: 'copa', cl: 'champions' }, PK_RAW = () => ({ jor: S.jor, cup: S.cupRaw, cl: S.clRaw });

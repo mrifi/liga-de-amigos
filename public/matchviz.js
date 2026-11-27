@@ -1322,7 +1322,7 @@
     let v0 = view; try { v0 = o.view || localStorage.getItem('mv-view') || '2d'; } catch (e) {}
     setView(v0 === '3d' ? '3d' : '2d');
     raf = requestAnimationFrame(frame);
-    return { update(nm2) { m = nm2; tl = build(m); mot = Motion(tl, mot.st); curBan = null; lastPanel = -1; prevR = r; }, destroy() { dead = true; cancelAnimationFrame(raf); SND.quiet(); r2 && r2.destroy(); r3 && r3.destroy(); root.innerHTML = ''; }, get r() { return r; } };
+    return { update(nm2) { m = nm2; tl = build(m); mot = Motion(tl, mot.st); curBan = null; lastPanel = -1; prevR = r; }, destroy() { dead = true; cancelAnimationFrame(raf); SND.quiet(); r2 && r2.destroy(); r3 && r3.destroy(); root.innerHTML = ''; }, get r() { return r; }, seek(x) { if (mode !== 'live') { r = Math.max(0, x); snap = true; prevR = null; } }, hold(on) { paused = !!on; try { SND.quiet(); } catch (e) { } if (el.ctrl) el.ctrl.innerHTML = ctrlHTML(); } };
   }
 
   G.MV = { build, sample, mount, LIVE_S, minuteAt, Motion };
