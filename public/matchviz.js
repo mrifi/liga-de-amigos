@@ -99,7 +99,7 @@
     const say = (t, txt, imp) => comm.push({ t, txt, imp: !!imp });
     const all = Object.values(P); all.forEach((p, i) => { p.i = i; });
     const SHORT = LIVE_S < 600, CEL = SHORT ? 3.6 : 6, KOD = SHORT ? 1.4 : 2.6;
-    const LEAD0 = pl => pl.type === 'goal' || pl.type === 'miss' || pl.type === 'save' ? (pl.k === 'pen' ? 2 : pl.k === 'fal' ? 4 : pl.k === 'con' ? 7 : 8.5) : pl.type === 'corner' ? 4.4 : pl.type === 'pen' ? 6 : pl.type === 'inj' ? 1.5 : pl.type === 'off' ? 4 : 3.4;
+    const LEAD0 = pl => pl.type === 'goal' || pl.type === 'miss' || pl.type === 'save' ? (pl.k === 'pen' ? 2 : pl.k === 'fal' ? 7.5 : pl.k === 'con' ? 7 : 8.5) : pl.type === 'corner' ? 4.4 : pl.type === 'pen' ? 6 : pl.type === 'inj' ? 1.5 : pl.type === 'off' ? 4 : 3.4;
     // partido corto (directo de pocos minutos): solo se escenifican las jugadas importantes; el resto va al relato y a los avisos
     const silent = []; let dbgShort = null;
     if (LIVE_S < 600 && m.v === 2) {
@@ -340,8 +340,13 @@
           }
           placed = true;
         }
-        const d = dirOf(s, t), bx = ball.x, by = ball.y;
-        sh.ov = { x: bx - d * (t < tShot - .7 ? 1.8 : .3), y: by, v: 3, until: t + .15 };
+        const d = dirOf(s, t), bx = ball.x, by = ball.y, far = hyp(sh.x, sh.y, bx - d * 1.8, by);
+        sh.ov = { x: bx - d * (t < tShot - .7 ? 1.8 : .3), y: by, v: t < tShot - .7 ? (far > 2.5 ? 7.5 : 3) : 4, until: t + .15 };
+        if (pl.k !== 'pen') { // barrera: 3-4 defensores a 9,15 m en la línea balón-portería
+          const gxw = X(s, t, FL), dx = gxw - bx, dy = 34 - by, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, wx = bx + ux * 9.15, wy = by + uy * 9.15;
+          on(1 - s).filter(q => q.p.pos !== 'POR').sort((a, b) => hyp(a.x, a.y, wx, wy) - hyp(b.x, b.y, wx, wy)).slice(0, L > 26 ? 3 : 4)
+            .forEach((q, j, arr) => { const o = (j - (arr.length - 1) / 2) * .75; q.ov = { x: wx - uy * o, y: wy + ux * o, v: 7, until: t + .2 }; });
+        }
         if (t >= tShot) { ball.dead = null; penSpot = null; ball.own = sh.p.i; ball.side = s; shoot(t, pl, sh, null); return true; }
         return false;
       } };
@@ -352,7 +357,7 @@
       ball.dead = { until: t + 6.5, walk: true, restart: tt => { penSpot = null; const gk = on(1 - s).find(q => q.p.pos === 'POR'); if (gk) { give(gk.p.i, tt); prot[1 - s] = tt + 2; } } };
       penSpot = { s, ...spot };
       phases.push({ t0: t, t1: t + 5.6, type: 'pen', s, x: spot.x, y: spot.y, pid: taker });
-      if (valid(s, taker)) qOf(taker).ov = { x: spot.x - dirOf(s, t) * 1.8, y: 34, v: 4, until: t + 5.6 };
+      if (valid(s, taker)) qOf(taker).ov = { x: spot.x - dirOf(s, t) * 1.8, y: 34, v: 7, until: t + 5.6 };
     }
     function sPen(pl, t0) {
       const s = pl.s, Tg = pl.t; let passed = false, recv = null;
@@ -440,14 +445,17 @@
         if (st === 1) {
           if (ball.fl) return false;
           ball.dead = { until: 1e9, walk: true }; ball.own = -1; ball.x = cx; ball.y = cy; ball.z = 0; ball.side = s;
-          taker = on(s).filter(q => /ED|EI|MCO|LD|LI|MC/.test(q.p.pos)).sort((a, b) => b.p.d - a.p.d)[0] || on(s)[0];
-          tk = t + 2.3;
+          const elig = on(s).filter(q => /ED|EI|MCO|LD|LI|MC/.test(q.p.pos)), pool = elig.length ? elig : on(s).filter(q => q.p.pos !== 'POR');
+          taker = pool.sort((a, b) => hyp(a.x, a.y, cx, cy) - hyp(b.x, b.y, cx, cy))[0] || on(s)[0];
+          tk = t + clamp(hyp(taker.x, taker.y, cx, cy) / 7.5 + 1.1, 2.3, 7);
           phases.push({ t0: t, t1: tk + 1.3, type: 'set', s, cx, cy, pid: taker && taker.p.id });
           banners.push({ t, d: 2, type: 'cor', s }); say(t, 'Córner. Lo saca ' + (taker ? nm(taker.p.id) : 'el extremo') + '.');
           if (taker) taker.ov = { x: cx + dirOf(s, t) * .6, y: cy + (cy < 34 ? -.6 : .6), v: 8, until: tk };
           st = 2; return false;
         }
-        if (t < tk) return false;
+        if (taker) taker.ov = { x: cx + dirOf(s, t) * .6, y: cy + (cy < 34 ? -.6 : .6), v: 8, until: t + .3 };
+        if (t < tk && !(taker && t > tk - 1 && hyp(taker.x, taker.y, cx, cy) < 1.4)) return false;
+        if (taker && hyp(taker.x, taker.y, cx, cy) > 1.6 && t < tk + 4) return false;
         const tg = wpick(R, on(s).filter(q => q.p.pos !== 'POR' && q !== taker), q => /DC|DFC/.test(q.p.pos) ? 3 : 1);
         const tx = X(s, t, FL - 8 - R() * 5), ty = clamp(34 + (R() - .5) * 14, 22, 46);
         ball.dead = null; if (taker) ball.own = taker.p.i;
@@ -497,7 +505,7 @@
       if (pl.type === 'pen') return sPen(pl, t);
       return sStop(pl, t);
     }
-    const LEAD = pl => pl.type === 'goal' || pl.type === 'miss' || pl.type === 'save' ? (pl.k === 'pen' ? 2 : pl.k === 'fal' ? 4 : pl.k === 'con' ? 7 : 8.5) : pl.type === 'corner' ? 4.4 : pl.type === 'pen' ? 6 : pl.type === 'inj' ? 1.5 : pl.type === 'off' ? 4 : 3.4;
+    const LEAD = pl => pl.type === 'goal' || pl.type === 'miss' || pl.type === 'save' ? (pl.k === 'pen' ? 2 : pl.k === 'fal' ? 7.5 : pl.k === 'con' ? 7 : 8.5) : pl.type === 'corner' ? 4.4 : pl.type === 'pen' ? 6 : pl.type === 'inj' ? 1.5 : pl.type === 'off' ? 4 : 3.4;
 
     /* --- objetivos de movimiento de cada jugador --- */
     function curPhase(t) { for (let i = phases.length - 1; i >= Math.max(0, phases.length - 6); i--) { const p = phases[i]; if (t >= p.t0 && t < p.t1) return p; } return null; }
