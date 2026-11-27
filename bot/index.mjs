@@ -105,6 +105,12 @@ function watch(code) {
   col('sobres', q => q.docChanges().forEach(ch => { if (ch.type === 'added') packNews(lg, ch.doc.id, dec(ch.doc.data())); }));
   col('ruleta', q => q.docChanges().forEach(ch => { if (ch.type === 'added') rulNews(lg, ch.doc.id, dec(ch.doc.data())); }));
   col('miembros', q => q.docs.forEach(d => { lg.mem[d.id] = d.data(); }));
+  // encuestas: un doc nuevo en encuestas/ se publica como encuesta de Telegram (pregunta + 2-10 opciones)
+  col('encuestas', q => q.docChanges().forEach(ch => {
+    if (ch.type !== 'added') return; const p = dec(ch.doc.data()); if (!p || !p.t || p.t < lg.boot - 60000 || !p.q || !Array.isArray(p.ops)) return;
+    const ops = p.ops.map(o => String(o).slice(0, 100)).filter(Boolean).slice(0, 10); if (ops.length < 2) return;
+    once(code + ':poll:' + ch.doc.id, () => tg('sendPoll', { chat_id: chatOf(code), question: String(p.q).slice(0, 300), options: ops.map(text => ({ text })), is_anonymous: p.anon === true, allows_multiple_answers: false }));
+  }));
   const store = (k, name) => col(name, q => {
     q.docs.forEach(d => { lg[k][d.id] = dec(d.data()); });
     q.docChanges().forEach(ch => { const d = lg[k][ch.doc.id]; if (d && d.fin) onFinal(lg, k, ch.doc.id, d); });
