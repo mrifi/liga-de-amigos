@@ -78,10 +78,22 @@ const ICONS = {
 
 /* ---------- estado derivado ---------- */
 const RES = {};
-function ordersFor(doc, k) {
+// órdenes del míster durante el partido: liga en ordenes/s<T>-m<J>-t<eq>; copa y Champions en ordenes/<cup|cl>-s<T>-r<ronda>-t<eq>
+const ordKey = (col, doc, ti) => col === 'jor' ? 's' + doc.season + '-m' + doc.md + '-t' + ti : col + '-s' + doc.season + '-r' + doc.round + '-t' + ti;
+function ordersFor(doc, k, col = 'jor') {
   const p = doc.pre[k], out = [];
-  [p.h, p.a].forEach((ti, s) => { const o = S.orders['s' + doc.season + '-m' + doc.md + '-t' + ti]; if (o && o.list) o.list.forEach(x => out.push({ ...x, s })); });
+  [p.h, p.a].forEach((ti, s) => { const o = S.orders[ordKey(col, doc, ti)]; if (o && o.list) o.list.forEach(x => out.push({ ...x, s })); });
   return out;
+}
+function manageFor(col, doc, k) {
+  const m = doc.m[k]; if (!(doc.pre && doc.pre[k] && D.my && S.canWrite && (m.h === D.myIdx || m.a === D.myIdx) && Date.now() < doc.at + LIVE)) return null;
+  const side = m.h === D.myIdx ? 0 : 1, okey = ordKey(col, doc, D.myIdx);
+  const manage = { side, bench: doc.pre[k].side[side].bench, onOrder: o => {
+    if (Date.now() > doc.at + LIVE) return toast('El partido ya ha terminado');
+    const cur = S.orders[okey]?.list || [], nowMin = E.minAt(Date.now() - doc.at), ord = { ...o, m: Math.max(o.m, nowMin), t: Date.now() };
+    write('ordenes/' + okey, () => S.db.doc('ordenes/' + okey).set({ season: doc.season, md: doc.md ?? null, round: doc.round ?? null, col, team: D.myIdx, list: [...cur, ord] })).then(() => toast(o.k === 'sub' ? 'Cambio hecho' : 'Táctica cambiada'));
+  }, openPanel: info => openTacPanel(info, manage, okey) };
+  return manage;
 }
 /* ---------- partido en directo: el resultado se sortea por tramos de 3 minutos justo antes de jugarse ---------- */
 const MAXSEG = Math.floor(92 / E.SEG), PRES_TTL = 40000;
@@ -124,7 +136,7 @@ function resolveDoc(doc, col) {
   const lv = doc.lv ? lvOf(doc, Date.now()) : null, lk = lv ? Object.keys(lv.sl).length + ':' + E.hash(JSON.stringify(lv.sl)) : '';
   let changed = false;
   const m = doc.pre.map((p, k) => {
-    const ords = col === 'jor' ? ordersFor(doc, k) : []; if (!ords.length && !lv) return doc.m[k];
+    const ords = ordersFor(doc, k, col); if (!ords.length && !lv) return doc.m[k];
     const key = col + doc.season + '-' + (doc.md ?? doc.round) + '-' + k + ':' + lk + JSON.stringify(ords);
     if (!RES[key]) RES[key] = E.resultFromPre(p, ords, lv);
     changed = true; return RES[key];
@@ -1596,6 +1608,81 @@ function pkOpenLive(cc, id, k) {
   const d = PK_RAW()[cc][id]; if (!d) return; const p = d.pre[k];
   pkOpen({ mode: 'live', cc, id, k, at0: d.at + E.MATCH_MS, H: teamByIdx(p.h), A: teamByIdx(p.a), mySide: D.myIdx === p.h ? 0 : D.myIdx === p.a ? 1 : -1 });
 }
+/* Panel de tácticas y cambios durante el partido (estilo Top Eleven): campo con tu once, banquillo debajo,
+   tocas al que sale y al que entra, y confirmas. */
+function openTacPanel(info, mg, okey) {
+  document.querySelector('.tacov')?.remove();
+  S.tacPend = S.tacPend || {}; const pend = S.tacPend[okey] = (S.tacPend[okey] || []).filter(x => x.m > info.mnow);
+  const t = D.my, c1 = t.colors[0], c2 = t.colors[1];
+  const st = { sel: null, bsel: null, tac: { ...info.tac }, form: info.form };
+  const ov = document.createElement('div'); ov.className = 'tacov'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'Tácticas y cambios');
+  document.body.appendChild(ov);
+  const outIds = () => new Set(pend.map(x => x.out)), inIds = () => new Set(pend.map(x => x.in));
+  const energy = p => Math.max(5, Math.round(cond(p.id) - 22 * Math.max(0, info.mnow - p.min0) / 90));
+  const tokB = (p, cls, style, key) => {
+    const pl = E.player(p.id), gk = p.pos === 'POR', en = energy(p), sel = st.sel === p.id || st.bsel === p.id;
+    return `<button class="tok tt ${cls} ${sel ? 'sel' : ''}" style="${style}" data-tp="${key}:${p.id}" aria-label="${esc(pl.name)}, ${p.pos || pl.pos}">
+      <span class="jw">${shirt(gk ? '#facc15' : c1, gk ? '#111111' : c2, ovrOf(p.id, t), key === 'bn' ? 40 : 42)}${p.badge ? `<span class="tbadge ${p.badge.c}">${p.badge.t}</span>` : ''}<span class="tp">${p.pos || pl.pos}${p.arrow || ''}</span></span>
+      <span class="n">${esc(surname(pl.name))}</span><span class="e"><i style="width:${en}%;${en < 60 ? 'background:var(--red)' : en < 75 ? 'background:var(--amber)' : ''}"></i></span></button>`;
+  };
+  function render() {
+    const outs = outIds(), ins = inIds(), used = info.used + pend.length, left = Math.max(0, 5 - used);
+    const field = info.on.filter(p => !outs.has(p.id)).map(p => ({ ...p }));
+    pend.forEach(x => { const o = info.on.find(p => p.id === x.out); if (o) field.push({ ...o, id: x.in, min0: x.m, badge: { c: 'pend', t: 'min ' + x.m } }); });
+    const selP = field.find(p => p.id === st.sel), bench = info.bench.filter(id => !ins.has(id));
+    const toks = field.map(p => tokB({ ...p, badge: p.badge || (p.inj ? { c: 'inj', t: '✚' } : p.ama ? { c: 'ama', t: '' } : null) }, '', `left:${(7 + p.x * .86).toFixed(1)}%;top:${(5 + p.y * .88).toFixed(1)}%`, p.badge && p.badge.c === 'pend' ? 'pend' : 'xi')).join('');
+    const btoks = bench.map(id => { const pl = E.player(id); return tokB({ id, pos: '', min0: info.mnow }, selP ? fitClass(id, selP.pos) : '', '', 'bn'); }).join('') || '<p class="small mute" style="margin:8px">No te quedan suplentes.</p>';
+    const bp = st.bsel && E.player(st.bsel), sp = selP && E.player(selP.id);
+    const fitTxt = selP && st.bsel ? (() => { const f = E.fit(bp.pos, selP.pos); return f >= .99 ? '<span class="tfit ok">Juega en su puesto</span>' : f >= .84 ? '<span class="tfit mid">Puesto parecido</span>' : '<span class="tfit bad">Fuera de su puesto</span>'; })() : '';
+    const bar = left <= 0 ? '<div class="tbar"><p>Ya has hecho los 5 cambios.</p></div>'
+      : selP && st.bsel ? `<div class="tbar"><div class="tsw"><div><small>Sale</small><b>${esc(surname(sp.name))}</b><span>${selP.pos}</span></div><span class="tarr">⇄</span><div><small>Entra</small><b>${esc(surname(bp.name))}</b><span>${bp.pos} · ${fitTxt}</span></div></div>
+          <div class="tbtns"><button class="btn ghost" data-ta="cancel">Cancelar</button><button class="btn" data-ta="sub">Confirmar cambio</button></div></div>`
+      : `<div class="tbar"><p>${selP ? `Has elegido a <b>${esc(surname(sp.name))}</b> (${selP.pos}). Ahora toca quién entra del banquillo.` : st.bsel ? `Va a entrar <b>${esc(surname(bp.name))}</b>. Ahora toca en el campo a quién sustituye.` : 'Toca un jugador del campo y luego uno del banquillo para cambiarlos.'}</p></div>`;
+    const seg = (k, obj) => `<div class="tseg" role="group">${Object.entries(obj).map(([v, l]) => `<button data-tk="${k}:${v}" aria-pressed="${st.tac[k] === v}">${l}</button>`).join('')}</div>`;
+    const tacDirty = ['ment', 'press', 'est'].some(k => st.tac[k] !== info.tac[k]) || st.form !== info.form;
+    ov.innerHTML = `<div class="tacbox">
+      <div class="tach"><div><b>Tácticas y cambios</b><small>Minuto ${info.mnow}' · Cambios ${used}/5 · lo que hagas entra en el minuto ${info.next}</small></div><button class="mvx" data-ta="close" aria-label="Cerrar">${IC.x}</button></div>
+      <div class="pitch tpitch">${pitchLines()}${toks}</div>
+      <div class="grp">Banquillo · ${left} cambio${left === 1 ? '' : 's'} disponible${left === 1 ? '' : 's'}</div><div class="tbench">${btoks}</div>
+      ${bar}
+      <div class="grp">Táctica</div>
+      <div class="ttac"><label>Mentalidad</label>${seg('ment', MENT)}<label>Presión</label>${seg('press', PRESS)}<label>Estilo</label>${seg('est', EST)}
+        <label>Formación</label><div class="tseg tform">${Object.keys(E.FORMS).map(f => `<button data-tf="${f}" aria-pressed="${st.form === f}">${f}</button>`).join('')}</div>
+        <button class="btn" data-ta="tac" ${tacDirty ? '' : 'disabled'}>${tacDirty ? 'Aplicar táctica' : 'Sin cambios en la táctica'}</button></div></div>`;
+  }
+  const close = () => { ov.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = e => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', onKey);
+  ov.addEventListener('click', e => {
+    if (e.target === ov) return close();
+    const b = e.target.closest('button'); if (!b) return;
+    const tp = b.dataset.tp;
+    if (tp) {
+      const [k, id] = tp.split(':');
+      if (k === 'pend') return toast('Ese cambio ya está pedido');
+      if (k === 'xi') st.sel = st.sel === id ? null : id;
+      if (k === 'bn') st.bsel = st.bsel === id ? null : id;
+      return render();
+    }
+    if (b.dataset.tk) { const [k, v] = b.dataset.tk.split(':'); st.tac[k] = v; return render(); }
+    if (b.dataset.tf) { st.form = b.dataset.tf; return render(); }
+    const a = b.dataset.ta;
+    if (a === 'close') return close();
+    if (a === 'cancel') { st.sel = st.bsel = null; return render(); }
+    if (a === 'sub' && st.sel && st.bsel) {
+      if (info.used + pend.length >= 5) return toast('Ya has hecho los 5 cambios');
+      const m0 = Math.max(info.next, E.minAt(Date.now() - info.at) + 1);
+      mg.onOrder({ k: 'sub', out: st.sel, in: st.bsel, m: m0 }); pend.push({ out: st.sel, in: st.bsel, m: m0 }); st.sel = st.bsel = null; return render();
+    }
+    if (a === 'tac') {
+      const m0 = Math.max(info.next, E.minAt(Date.now() - info.at) + 1);
+      if (['ment', 'press', 'est'].some(k => st.tac[k] !== info.tac[k])) mg.onOrder({ k: 'tac', tac: { ...st.tac }, m: m0 });
+      if (st.form !== info.form) mg.onOrder({ k: 'form', form: st.form, m: m0 });
+      info.tac = { ...st.tac }; info.form = st.form; return render();
+    }
+  });
+  render();
+}
 function openViewer(opts) {
   opener = document.activeElement; closeViewer(true);
   const ov = document.createElement('div'); ov.className = 'mvov'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true');
@@ -1682,11 +1769,7 @@ const ACT = {
   match: key => {
     const [ss, md, k] = key.split('-').map(Number), doc = D.all.find(d => d.season === ss && d.md === md); if (!doc) return;
     const m = doc.m[k], lo = liveOpts('jor', 's' + ss + '-m' + md, doc, k), live = lo.live; S.modal = null; render();
-    let manage = null;
-    if (live && doc.pre && D.my && S.canWrite && (m.h === D.myIdx || m.a === D.myIdx)) {
-      const side = m.h === D.myIdx ? 0 : 1, okey = 's' + ss + '-m' + md + '-t' + D.myIdx;
-      manage = { side, bench: doc.pre[k].side[side].bench, onOrder: o => { if (Date.now() > doc.at + LIVE) return toast('El partido ya ha terminado'); const cur = S.orders[okey]?.list || []; const nowMin = E.minAt(Date.now() - doc.at); const ord = { ...o, m: Math.max(o.m, nowMin), t: Date.now() }; write('ordenes/' + okey, () => S.db.doc('ordenes/' + okey).set({ season: ss, md, team: D.myIdx, list: [...cur, ord] })).then(() => toast(o.k === 'sub' ? 'Cambio hecho' : 'Táctica cambiada')); } };
-    }
+    const manage = live ? manageFor('jor', doc, k) : null;
     openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...lo, speed: 4, manage, summary: endSummary('league', doc, { get pens() { const d = (D.all || []).find(x => x.season === doc.season && x.md === doc.md) || doc, mm = d.m[k]; return mm && mm.hg === mm.ag ? E.pensOf(d, k) : null; } }) });
   },
   friendly: () => { S.modal = { type: 'friendly' }; render(); },
@@ -1721,8 +1804,8 @@ const ACT = {
   bid: id => bid(id).catch(e => console.warn(e)),
   auction: pid => { S.modal = { type: 'auction', id: pid }; render(); },
   auctiongo: pid => { const m = +($('#auc-dur')?.value || 30); try { localStorage.setItem('auc-dur', m); } catch (e) {} auctionMine(pid, m); },
-  cupmatch: a => { const [r, k] = a.split('-').map(Number), id = 's' + D.Sx + '-r' + r, doc = S.cup[id]; if (!doc) return; const m = doc.m[k]; openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...liveOpts('cup', id, doc, k), speed: 4, summary: endSummary('cup', doc, { pens: doc.pens && doc.pens[k] }) }); },
-  clmatch: a => { const [r, k] = a.split('-').map(Number), id = 's' + D.Sx + '-r' + r, doc = S.cl[id]; if (!doc) return; const m = doc.m[k]; openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...liveOpts('cl', id, doc, k), speed: 4, summary: endSummary('cl', doc, { pens: r === 3 ? doc.pens && doc.pens[k] : null, final: r === 3 }) }); },
+  cupmatch: a => { const [r, k] = a.split('-').map(Number), id = 's' + D.Sx + '-r' + r, doc = S.cup[id]; if (!doc) return; const m = doc.m[k]; openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...liveOpts('cup', id, doc, k), speed: 4, manage: manageFor('cup', doc, k), summary: endSummary('cup', doc, { pens: doc.pens && doc.pens[k] }) }); },
+  clmatch: a => { const [r, k] = a.split('-').map(Number), id = 's' + D.Sx + '-r' + r, doc = S.cl[id]; if (!doc) return; const m = doc.m[k]; openViewer({ match: m, H: teamByIdx(m.h), A: teamByIdx(m.a), ...liveOpts('cl', id, doc, k), speed: 4, manage: manageFor('cl', doc, k), summary: endSummary('cl', doc, { pens: r === 3 ? doc.pens && doc.pens[k] : null, final: r === 3 }) }); },
   muro: async () => { const el = $('#muro-txt'), txt = (el && el.value || '').trim().slice(0, 180); if (!txt || !D.my) return; const ref = S.db.collection('muro').doc(); await write('muro/' + ref.id, () => ref.set({ id: ref.id, by: S.me, team: D.my.id, txt, t: Date.now() })); el.value = ''; },
   sponsor: id => { const t = D.my, o = E.sponsorOffers(t, D.Sx, D.fans(D.myIdx)).find(x => x.id === id); ask('Firmar con ' + o.name, `${money(o.pm)} por partido${o.pw ? ' y ' + money(o.pw) + ' extra por cada victoria' : ''}, toda la temporada ${D.Sx}.`, 'Firmar', () => saveTeam(t.id, { spon: { ...o, s: D.Sx } })); },
   build: k => { const t = D.my, l = (t.fac || {})[k] || 0, F = E.FAC[k], cost = F.cost[l]; ask(F.n + ' nivel ' + (l + 1), `Cuesta ${money(cost)} y tarda ${12 * (l + 1)} horas. ${F.d}`, 'Construir', () => saveTeam(t.id, { fac: { ...(t.fac || {}), [k]: l + 1 }, build: { k, lvl: l + 1, done: Date.now() + (l + 1) * 43200000 }, ledger: ledgerAdd(t, -cost, 'Obras: ' + F.n + ' ' + (l + 1)) })); },

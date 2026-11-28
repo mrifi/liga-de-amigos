@@ -20,15 +20,19 @@
   const DT = .1;
   function shapeTarget(p, t, bx, by, possSide) {
     const s = p.s, own = possSide === s, bu = U(s, t, bx);
-    if (p.pos === 'POR') { const u = clamp(2.5 + bu * .09, 2, own ? 16 : 11); return { x: X(s, t, u), y: 34 + (by - 34) * .15 }; }
+    if (p.pos === 'POR') {
+      // el portero se coloca en la línea balón-centro de su portería: más adelantado cuanto más lejos está el balón
+      const gx = X(s, t, 0), dx = bx - gx, dy = by - 34, L = Math.hypot(dx, dy) || 1, dd = clamp(1.2 + L * (own ? .16 : .07), 1.2, own ? 16 : 7);
+      return { x: gx + dx / L * dd, y: clamp(34 + dy / L * dd, 30.6, 37.4) };
+    }
     let L, span;
     if (own) { L = clamp(bu * .62 + 4, 14, 52); span = 50; } else { L = clamp(bu * .5 - 3, 8, 36); span = 34; }
     const ph = t * .35 + p.h;
-    let u = L + (p.d - .25) / .6 * span + Math.sin(ph) * 1.3;
+    let u = L + (p.d - .25) / .6 * span + Math.sin(ph) * .6;
     if (own && p.fwd && bu > 40) u += 2 + 4 * Math.max(0, Math.sin(t * .45 + p.h * 2));
     u = clamp(u, 3, own ? 93 : 78);
     const yw = FW * (.07 + .86 * (1 - p.w)), lat = dirOf(s, t) > 0 ? yw : FW - yw;
-    const y = 34 + (lat - 34) * (own ? 1.05 : .7) + (by - 34) * (own ? .2 : .42) + Math.cos(ph * 1.3) * 1.2;
+    const y = 34 + (lat - 34) * (own ? 1.05 : .7) + (by - 34) * (own ? .2 : .42) + Math.cos(ph * 1.3) * .5;
     return { x: clamp(X(s, t, u), 1, FL - 1), y: clamp(y, 1.5, FW - 1.5) };
   }
   function resetSpot(p, t) {
@@ -94,7 +98,7 @@
     }
     plays.sort((a, b) => a.t - b.t);
 
-    const phases = [], banners = [], comm = [], goals = [], kicks = [], netT = [];
+    const phases = [], banners = [], comm = [], goals = [], kicks = [], netT = [], tackles = [], dives = [];
     const nm = id => { const n = E.player(id).name.split(' '); return n.length > 1 && !/^J[úu]nior$/.test(n[n.length - 1]) ? n.slice(1).join(' ') : n[0]; };
     const say = (t, txt, imp) => comm.push({ t, txt, imp: !!imp });
     const all = Object.values(P); all.forEach((p, i) => { p.i = i; });
@@ -111,11 +115,19 @@
       let prevEnd = -1;
       for (const pl of plays.filter(isMust)) { pl.t0 = pl.t; pl.h1 = pl.m <= 45; if (pl.t - LEAD0(pl) < prevEnd) pl.t = prevEnd + LEAD0(pl); prevEnd = pl.t + aft(pl); keep.push(pl); }
       const busy = keep.map(pl => [pl.t - LEAD0(pl) - .5, pl.t + aft(pl) + .5]);
+      // después, en los huecos que queden: entradas, segadas, regates y faltas (para que se vea defender y no solo tirar)
+      const light = [];
       for (const pl of plays) {
         if (isMust(pl)) continue;
-        if (LIGHT[pl.type] || pl.type === 'foul') { silent.push(pl); continue; }
+        if (LIGHT[pl.type] || pl.type === 'foul') { light.push(pl); continue; }
         const a = pl.t - LEAD0(pl), b = pl.t + aft(pl) + 1.5;
         if (a < 1 || busy.some(([x, y]) => a < y && b > x)) { silent.push(pl); continue; }
+        pl.t0 = pl.t; pl.h1 = pl.m <= 45; busy.push([a, b]); keep.push(pl);
+      }
+      for (const pl of light) {
+        if (pl.type === 'off') { silent.push(pl); continue; }
+        const a = pl.t - LEAD0(pl), b = pl.t + 2.6;
+        if (a < 3 || busy.some(([x, y]) => a < y + 1 && b > x - 1)) { silent.push(pl); continue; }
         pl.t0 = pl.t; pl.h1 = pl.m <= 45; busy.push([a, b]); keep.push(pl);
       }
       keep.sort((p, q) => p.t - q.t);
@@ -213,8 +225,13 @@
       const c = owner();
       if (c) {
         const b = nearestOf(s, c); if (!b) return false; const bd = hyp(b.x, b.y, c.x, c.y);
-        if (bd < 3.2) { give(b.p.i, t); nextDec = t + .5; }
-        else { let tq = null, td = 1e9; for (const q of on(s)) if (q.p.pos !== 'POR') { const d = hyp(q.x, q.y, c.x, c.y); if (d > 6 && d < td) { td = d; tq = q; } } tq = tq || b; kick(t, tq.p.i, tq.x, tq.y, { lofted: td > 32 }); }
+        if (bd < 1.5) { give(b.p.i, t); nextDec = t + .5; tackles.push({ t, pid: b.p.id, vic: c.p.id }); return true; }
+        // ¿hay un pase del rival que se pueda cortar? (defensor cerca de la línea de pase hacia un compañero)
+        let best = null;
+        for (const mt of on(c.p.s)) { if (mt === c || mt.p.pos === 'POR') continue; const dm = hyp(c.x, c.y, mt.x, mt.y); if (dm < 7 || dm > 38) continue;
+          for (const z of on(s)) { if (z.p.pos === 'POR') continue; const sd = segDist(c.x, c.y, mt.x, mt.y, z.x, z.y); if (sd.f < .2 || sd.f > .9) continue; if (!best || sd.d < best.d) best = { z, mt, ...sd }; } }
+        if (best && (best.d < 3.5 || bd > 9)) { const ix = lerp(c.x, best.mt.x, best.f), iy = lerp(c.y, best.mt.y, best.f); best.z.ov = { x: ix, y: iy, v: 7, until: t + .6 }; kick(t, best.z.p.i, ix, iy, { dur: Math.max(.3, hyp(c.x, c.y, ix, iy) / 16 + .15) }); if (R() < .35) say(t, 'Corta el pase ' + nm(best.z.p.id) + '.'); return true; }
+        b.ov = { x: c.x, y: c.y, v: 8, until: t + .2 };
         return true;
       }
       if (!ball.fl) { const b = nearestOf(s, ball, true); if (b && hyp(b.x, b.y, ball.x, ball.y) < 4) { give(b.p.i, t); return true; } if (b) b.ov = { x: ball.x, y: ball.y, v: 8.5, until: t + .2 }; }
@@ -237,9 +254,18 @@
       if (pl.k === 'pen') say(t, 'Lanza ' + nm(shooter.p.id) + '…', true);
       else say(t, (z0 > .8 ? 'Remate de cabeza de ' : pl.k === 'fal' ? 'Lanza la falta ' : pl.k === 'con' ? '¡Contraataque! Dispara ' : pl.type === 'goal' ? '¡Dispara ' : 'Disparo de ') + nm(shooter.p.id) + '…');
       ball.own = -1;
+      const dive = (ty, reach, dur) => { // estirada del portero hacia donde va el balón (se queda corto si es gol)
+        if (!gk) return; const dy = ty - gk.y, side = dy < 0 ? -1 : 1, ad = Math.abs(dy);
+        const ey = gk.y + side * Math.min(ad, reach), ex = gx - dirx * .8;
+        gk.ov = { x: ex, y: ey, v: 7, until: t + dur + .9 };
+        if (ad > .9) dives.push({ t0: t + .16, t1: t + dur + 1.1, type: 'dive', pid: gk.p.id, s: 1 - s, side, x: ex, y: ey });
+      };
+      const gky = gk ? gk.y : 34;
       if (pl.type === 'goal') {
-        const ty = 34 + (R() < .5 ? -1 : 1) * (1 + R() * 2.4), tz = .3 + R() * 1.8;
-        if (gk) gk.ov = { x: gx - dirx * .7, y: clamp(ty + (ty < 34 ? 1.4 : -1.4), 30, 38), v: 5, until: t + shotDur + .6 };
+        // a la base del palo contrario a donde está el portero (si es penalti, al azar)
+        const side = pl.k === 'pen' ? (R() < .5 ? -1 : 1) : (R() < .78 ? (gky > 34 ? -1 : 1) : (gky > 34 ? 1 : -1));
+        const ty = 34 + side * (1.6 + R() * 1.7), tz = R() < .55 ? .2 + R() * .5 : .9 + R() * 1.3;
+        if (pl.k === 'pen') dive(34 + (R() < .65 ? -side : side) * 2.4, 2.6, shotDur); else if (R() < .35) dive(gky - side * 3, 1.6, shotDur); /* lo engaña: se tira al otro lado */ else dive(ty, Math.max(0, Math.abs(ty - gky) - 2.6), shotDur);
         kick(t, -1, gx + dirx * .9, ty, { dur: shotDur, shot: true, h: pl.k === 'fal' ? 1.6 : .4, z0, z1: tz, by, out: T => {
           ball.net = { t0: T, x0: ball.x, x1: gx + dirx * 1.7, z0: tz }; ball.dead = { until: 1e9 }; netT.push(T);
           goals.push({ t: T, s, p: shooter.p.id, a: assister && assister.p.id, m: pl.m });
@@ -250,7 +276,7 @@
           later(T + CEL, tt => kickoff(1 - s, tt), 'ko');
         } });
       } else if (pl.type === 'miss' && pl.post) {
-        const ty = 34 + (R() < .5 ? -1 : 1) * 3.6;
+        const ty = 34 + (R() < .5 ? -1 : 1) * 3.6; dive(ty, 2.2, shotDur);
         kick(t, -1, gx, ty, { dur: shotDur, shot: true, h: .5, z0, z1: 1.2, by, out: T => {
           banners.push({ t: T, d: 2.2, type: 'pal', s, p: shooter.p.id }); say(T, '¡Al palo! ' + nm(shooter.p.id) + ' estaba cerca.', true);
           kick(T, -1, gx - dirx * 9, clamp(ty + (ty < 34 ? 5 : -5), 3, FW - 3), { dur: .8, h: 1.5, z0: 1.2 });
@@ -258,6 +284,7 @@
         } });
       } else if (pl.type === 'miss') {
         const over = R() < .35, ty = over ? 34 + (R() - .5) * 5 : 34 + (R() < .5 ? -1 : 1) * (4.6 + R() * 5);
+        if (!over && Math.abs(ty - 34) < 6) dive(ty, 2, shotDur);
         kick(t, -1, gx + dirx * 3, ty, { dur: shotDur, shot: true, h: over ? 2.6 : .5, z0, z1: over ? 3.2 : .4, by, out: T => {
           banners.push({ t: T, d: 2.2, type: 'miss', s, p: shooter.p.id }); say(T, over ? 'El balón se va por encima del larguero.' : 'Se marcha fuera por poco.');
           ball.z = 0; const spot = { x: X(s, T, 99.5), y: 34 + (R() - .5) * 8 };
@@ -265,8 +292,9 @@
           ball.dead = { until: T + 2.6, walk: true, restart: tt => { ball.x = spot.x; ball.y = spot.y; if (gk && gk.on) { give(gk.p.i, tt); prot[1 - s] = tt + 2.5; nextDec = tt + 1.4; } } };
         } });
       } else {
-        const ty = 34 + (R() - .5) * 4, hx = gx - dirx * 1.3;
-        if (gk) gk.ov = { x: hx, y: ty, v: 6, until: t + shotDur + .3 };
+        // parada: el balón va a un sitio al que el portero llega (a veces sin moverse, a veces con estirada)
+        const ty = clamp(gky + (R() - .5) * 2 * (R() < .5 ? 1 : 2.6), 31, 37), hx = gx - dirx * 1.1;
+        if (Math.abs(ty - gky) > .9) dive(ty, 3, shotDur); else if (gk) gk.ov = { x: hx, y: ty, v: 4, until: t + shotDur + .3 };
         kick(t, gk ? gk.p.i : -1, hx, ty, { dur: shotDur, shot: true, h: .5, z0, z1: 1 + R(), by, rv: 6, out: T => {
           banners.push({ t: T, d: 2.4, type: 'save', s, p: shooter.p.id, gk: gk && gk.p.id }); say(T, (gk ? '¡Paradón de ' + nm(gk.p.id) + '!' : '¡Lo saca la defensa!'), true);
           ball.z = 0; if (gk && gk.on) { give(gk.p.i, T); prot[1 - s] = T + 2.6; nextDec = T + 2; }
@@ -281,8 +309,10 @@
       const shooter = valid(s, pl.p) ? qOf(pl.p) : wpick(R, on(s).filter(q => q.p.pos !== 'POR'), q => SHOTW[q.p.pos]);
       if (!shooter) return null;
       const assister = valid(s, pl.a) && pl.a !== shooter.p.id ? qOf(pl.a) : null, cab = pl.k === 'cab', con = pl.k === 'con';
-      const spotU = cab ? 88 + R() * 5 : shooter.p.pos === 'DC' ? 85 + R() * 9 : 78 + R() * 11;
-      const spotY = clamp(34 + (R() - .5) * (cab ? 10 : shooter.p.pos === 'DC' ? 16 : 28), 8, 60), sd = R() < .5 ? -1 : 1;
+      // los goles salen casi siempre desde dentro del área; los tiros que van fuera o al portero, también desde la frontal
+      const gl = pl.type === 'goal', dc = shooter.p.pos === 'DC';
+      const spotU = cab ? 92 + R() * 4 : gl ? (dc ? 89 + R() * 6.5 : (R() < .8 ? 87 + R() * 6 : 80 + R() * 6)) : (dc ? 86 + R() * 8 : 79 + R() * 11);
+      const spotY = clamp(34 + (R() - .5) * (cab ? 9 : Math.min(28, (105 - spotU) * 1.7)), 9, 59), sd = R() < .5 ? -1 : 1;
       const aU = cab ? 86 + R() * 6 : 68 + R() * 10, aY = cab ? (sd < 0 ? 6 : 62) : clamp(34 + sd * (8 + R() * 12), 6, 62);
       const est = (d, lo) => lo ? d / 19 + .55 : clamp(d / 16 + .15, .3, 2.6);
       let stage = 0, passedA = false;
@@ -390,13 +420,14 @@
         const c = owner();
         if (c && victim && c !== victim && !passed && t < Tg - 1.3) { passTo(t, victim, { safe: true }); passed = true; }
         const cur = owner() || (ball.fl && ball.fl.to >= 0 ? Q[ball.fl.to] : null); if (!cur) return t > Tg + 6;
-        const st = valid(s, pl.p) ? qOf(pl.p) : nearestOf(s, cur); if (!st) return true;
+        if (!this.st) { const des = valid(s, pl.p) ? qOf(pl.p) : null; this.st = des && hyp(des.x, des.y, cur.x, cur.y) < 14 ? des : nearestOf(s, cur); } // entra el que está cerca, no uno del otro lado del campo
+        const st = this.st; if (!st || !st.on) return true;
         const d = dirOf(s, t);
         st.ov = { x: cur.x + d * .6, y: cur.y, v: 8, until: t + .15 };
         if (!ph) { ph = { t0: Math.max(t, Tg - 1.1), t1: Tg + (pl.slide ? 1.6 : .7), type: 'tackle', pid: st.p.id, vic: cur.p.id, slide: pl.slide }; phases.push(ph); }
         if (t < Tg || !owner()) return false;
         const cc = owner(); prot[vs] = 0;
-        if (hyp(st.x, st.y, cc.x, cc.y) > 3.5) { st.x = lerp(st.x, cc.x, .5); st.y = lerp(st.y, cc.y, .5); }
+        if (hyp(st.x, st.y, cc.x, cc.y) > 1.8) { if (t < Tg + 2.5) { ph.t1 = Math.max(ph.t1, t + (pl.slide ? 1.6 : .7)); return false; } ph.t1 = t; return true; } // no llega: no hay entrada
         if (pl.slide) {
           st.ov = { x: st.x, y: st.y, v: .3, until: t + 1.3 }; cc.ov = { x: cc.x, y: cc.y, v: 1, until: t + 1.1 };
           kick(t, -1, clamp(cc.x - d * 2.8, 2, FL - 2), clamp(cc.y + (R() - .5) * 4, 2, FW - 2), { dur: .45, by: st.p.i }); ball.side = s;
@@ -424,7 +455,7 @@
           started = true; const sd = R() < .5 ? -1 : 1, x0 = c.x, y0 = c.y;
           c.ov = { x: clamp(x0 + d * 3, 2, FL - 2), y: clamp(y0 + sd * 3.5, 3, FW - 3), v: 7, until: t + .9 };
           later(t + .9, () => { if (c.on) c.ov = { x: clamp(x0 + d * 8, 2, FL - 2), y: clamp(y0 + sd * 2, 3, FW - 3), v: 7.5, until: t + 1.8 }; });
-          if (dfn) { dfn.x = lerp(dfn.x, x0 + d * 2, .6); dfn.y = lerp(dfn.y, y0, .6); dfn.ov = { x: dfn.x, y: dfn.y - sd * .8, v: 1.2, until: t + 1.5 }; }
+          if (dfn) dfn.ov = { x: x0 + d * 1.6, y: y0 - sd * .9, v: 3, until: t + 1.4 }; // se queda clavado y se gira tarde
           phases.push({ t0: t - .4, t1: t + 1.3, type: 'drib', pid: c.p.id, def: dfn && dfn.p.id, bx: x0 + d * 1.5, by: y0 });
           prot[s] = t + 1.8;
           banners.push({ t: t + .3, d: 1.5, type: 'reg', s, p: c.p.id, q: dfn && dfn.p.id });
@@ -577,12 +608,18 @@
       const A = []; for (const q of Q) if (q.on) A.push(q);
       const n = A.length, bo = ball.own;
       for (let a = 0; a < n; a++) {
-        const q = A[a], g = T[q.p.i]; if (!g) continue;
+        const q = A[a], g0 = T[q.p.i]; if (!g0) continue;
+        // los movimientos libres siguen un objetivo suavizado (nadie corrige el rumbo 10 veces por segundo);
+        // las órdenes de guion (q.ov) van directas para que la jugada llegue a su hora
+        const urgent = g0 === q.ov || (g0.v || 0) >= 7;
+        if (q.tx == null || urgent) { q.tx = g0.x; q.ty = g0.y; } else { const k0 = 1 - Math.exp(-DT / .45); q.tx += (g0.x - q.tx) * k0; q.ty += (g0.y - q.ty) * k0; }
+        const g = { x: q.tx, y: q.ty, v: g0.v };
         let dx = g.x - q.x, dy = g.y - q.y; const d = Math.sqrt(dx * dx + dy * dy);
         if (bo !== q.p.i) for (let b = 0; b < n; b++) { if (b === a) continue; const z = A[b], sx = q.x - z.x; if (sx > 1.4 || sx < -1.4) continue; const sy = q.y - z.y; if (sy > 1.4 || sy < -1.4) continue; const s2 = sx * sx + sy * sy; if (s2 < 1.96 && s2 > 1e-6 && bo !== z.p.i) { const sd = Math.sqrt(s2), k2 = (1.4 - sd) * 2 / sd; dx += sx * k2; dy += sy * k2; } }
         const dd = Math.sqrt(dx * dx + dy * dy), want = Math.min(g.v || 5.4, d * 1.5);
         const wx = dd > 1e-4 ? dx / dd * want : 0, wy = dd > 1e-4 ? dy / dd * want : 0;
-        let ax = wx - q.vx, ay = wy - q.vy; const al = Math.sqrt(ax * ax + ay * ay), am = 9 * DT; if (al > am) { ax *= am / al; ay *= am / al; }
+        const cs = Math.sqrt(q.vx * q.vx + q.vy * q.vy), braking = want < cs - .3;
+        let ax = wx - q.vx, ay = wy - q.vy; const al = Math.sqrt(ax * ax + ay * ay), am = (braking ? 7.5 : urgent ? 6.5 : 4.2) * DT; if (al > am) { ax *= am / al; ay *= am / al; }
         q.vx += ax; q.vy += ay; q.x = clamp(q.x + q.vx * DT, -1.5, FL + 1.5); q.y = clamp(q.y + q.vy * DT, -1.5, FW + 1.5);
       }
     }
@@ -645,7 +682,7 @@
     evT.filter(e => e.t === 'cam').forEach(e => { banners.push({ t: e.tt, d: 3, type: 'sub', s: e.s, p: e.p, q: e.q }); say(e.tt, 'Cambio: entra ' + nm(e.p) + ', sale ' + nm(e.q) + '.'); });
     banners.sort((a, b) => a.t - b.t); comm.sort((a, b) => a.t - b.t); kicks.sort((a, b) => a.t - b.t);
     const windows = [...goals.map(g => g.t), ...banners.filter(b => ['miss', 'save', 'roja', 'les', 'pen', 'pal', 'seg', 'reg'].includes(b.type)).map(b => b.t)].sort((a, b) => a - b);
-    return { m, P, side, all, N, TR, BX, BY, BZ, BO, BT, BS, BF, kicks, netT, phases, banners, comm, goals, windows, plays, active, possT, dbgShort };
+    return { m, P, side, all, N, TR, BX, BY, BZ, BO, BT, BS, BF, kicks, netT, phases, banners, comm, goals, windows, plays, active, possT, dbgShort, tackles, dives };
   }
 
   /* ---------- muestreo en un instante ---------- */
@@ -676,10 +713,12 @@
         seen.add(p.id);
         let o = st[p.id]; if (!o) o = st[p.id] = { id: p.id, s: p.s, num: p.num, pos: p.pos, x, y, vx: 0, vy: 0, ph: p.h, face: p.s ? Math.PI : 0 };
         o.x = x; o.y = y; o.vx = vx; o.vy = vy; o.sp = sp; o.ph += dt * (2 + sp * 1.6);
-        const faceT = sp > .6 ? Math.atan2(vy, vx) : Math.atan2(smp.y - y, smp.x - x);
+        const dv = p.pos === 'POR' && tl.dives ? tl.dives.find(d => d.pid === p.id && r >= d.t0 && r < d.t1) : null;
+        const faceT = sp > .6 && !dv ? Math.atan2(vy, vx) : dv ? (dirOf(p.s, r) > 0 ? 0 : Math.PI) : Math.atan2(smp.y - y, smp.x - x);
         let dfa = faceT - o.face; while (dfa > Math.PI) dfa -= 6.283; while (dfa < -Math.PI) dfa += 6.283; o.face += dfa * (snap || tele ? 1 : Math.min(1, dt * 8));
         o.down = !!(ph && (ph.down === p.id || (ph.type === 'tackle' && ph.slide && p.id === ph.pid && r > ph.t1 - 1.4 && r < ph.t1 - .1)));
-        o.act = ph && ph.type === 'tackle' && ph.slide && p.id === ph.pid ? 'slide' : ph && (ph.type === 'celebr' || ph.type === 'fin') && p.s === ph.s && p.pos !== 'POR' ? 'cheer' : (smp.kicker === p.id && r - smp.kt < .45 ? 'kick' : null);
+        o.dive = dv ? { k: clamp((r - dv.t0) / .45, 0, 1), side: dv.side, lat: Math.cos(o.face) * dv.side >= 0 ? 1 : -1 } : null;
+        o.act = dv ? 'dive' : ph && ph.type === 'tackle' && ph.slide && p.id === ph.pid ? 'slide' : ph && (ph.type === 'celebr' || ph.type === 'fin') && p.s === ph.s && p.pos !== 'POR' ? 'cheer' : (smp.kicker === p.id && r - smp.kt < .45 ? 'kick' : null);
       }
       for (const id in st) if (!seen.has(id)) delete st[id];
       return Object.values(st);
@@ -741,7 +780,17 @@
         ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(x + 1.5, y + 2, rad, rad * .8, 0, 0, 6.283); ctx.fill();
         if (smp.own === p.id) { ctx.strokeStyle = '#ffd400'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, rad + 4, 0, 6.283); ctx.stroke(); }
         ctx.fillStyle = gk ? k.gk : k.shirt; ctx.strokeStyle = gk ? k.gkTrim : k.trim; ctx.lineWidth = 2.2;
+        const ang = (wx, wy) => { const b = mp(p.x + wx, p.y + wy); return Math.atan2(b[1] - y, b[0] - x); };
+        if ((p.act === 'dive' && p.dive) || p.act === 'slide') {
+          // estirada del portero (tumbado hacia el lado del balón) o segada (tumbado en la dirección de la carrera)
+          const dv = p.act === 'dive', kk = dv ? p.dive.k : 1, a2 = dv ? ang(0, p.dive.side) : ang(Math.cos(p.face), Math.sin(p.face));
+          ctx.save(); ctx.translate(x, y); ctx.rotate(a2);
+          ctx.beginPath(); ctx.ellipse(rad * .55 * kk, 0, rad * (1 + .85 * kk), rad * .62, 0, 0, 6.283); ctx.fill(); ctx.stroke();
+          if (dv) { ctx.fillStyle = '#f8fafc'; ctx.strokeStyle = '#111'; ctx.lineWidth = 1.2; for (const oy of [-.32, .32]) { ctx.beginPath(); ctx.arc(rad * (1.25 + .85 * kk), oy * rad, rad * .3, 0, 6.283); ctx.fill(); ctx.stroke(); } }
+          ctx.restore(); continue;
+        }
         ctx.beginPath(); ctx.arc(x, y, p.down ? rad * .8 : rad, 0, 6.283); ctx.fill(); ctx.stroke();
+        if (!p.down && p.face != null) { const a2 = ang(Math.cos(p.face), Math.sin(p.face)); ctx.fillStyle = gk ? k.gkTrim : k.trim; ctx.beginPath(); ctx.moveTo(x + Math.cos(a2) * (rad + 4), y + Math.sin(a2) * (rad + 4)); ctx.lineTo(x + Math.cos(a2 + .45) * (rad + .5), y + Math.sin(a2 + .45) * (rad + .5)); ctx.lineTo(x + Math.cos(a2 - .45) * (rad + .5), y + Math.sin(a2 - .45) * (rad + .5)); ctx.closePath(); ctx.fill(); }
         ctx.fillStyle = gk ? '#111' : k.trim; ctx.font = `800 ${Math.round(rad * 1.05)}px "Barlow Condensed","Arial Narrow",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(p.num, x, y + .5);
       }
       const own = pls.find(p => p.id === smp.own);
@@ -1117,6 +1166,7 @@
     play: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/></svg>',
     pause: '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z" fill="currentColor"/></svg>'
   };
+  const MENT_L = { def: 'Defensiva', equ: 'Equilibrada', ofe: 'Ofensiva' }, PRESS_L = { baj: 'Baja', med: 'Media', alt: 'Alta' };
   function mount(root, o) {
     let m = o.match, tl = build(m), mot = Motion(tl); const kit = kits(o.H, o.A), esc = o.esc, MG = o.manage || null;
     const reduced = (() => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } })();
@@ -1128,7 +1178,7 @@
       <div class="mv-top"><div class="mv-t">${o.crest(o.H, 36)}<b>${esc(o.H.short)}</b></div><div class="mv-sc"><span class="mv-score">0-0</span><span class="mv-clk">0'</span></div><div class="mv-t r"><b>${esc(o.A.short)}</b>${o.crest(o.A, 36)}</div></div>
       <div class="mv-stage"><div class="mv-r2"></div><div class="mv-r3"></div><div class="mv-flash"></div><div class="mv-ban" aria-live="polite"></div><div class="mv-load" style="display:none">Cargando estadio 3D…</div>
         <div class="mv-tools"><div class="seg"><button data-v="2d">2D</button>${o.old3d || !o.onPalco ? '<button data-v="3d">' + (o.onPalco ? '3D clásico' : '3D') + '</button>' : ''}${o.onPalco ? '<button data-pal="1" class="mv-pal">3D</button>' : ''}</div><div class="seg mv-cams"><button data-c="tv">TV</button><button data-c="aerea">Aérea</button><button data-c="jug">Cerca</button></div></div>
-        <div class="mv-comm"></div><div class="mv-end" hidden></div></div>
+        <div class="mv-comm"></div>${MG && MG.openPanel ? '<button class="mv-tacb" data-act2="tacs" aria-label="Tácticas y cambios"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16M4 12h10M4 19h16" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="17" cy="12" r="2.6" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>Cambios</button>' : ''}<div class="mv-end" hidden></div></div>
       <div class="mv-ctrl"></div>
       <div class="mv-tabs">${MG ? '<button data-tab="ges" aria-pressed="true">Gestión</button>' : ''}<button data-tab="nar" aria-pressed="${!MG}">Relato</button><button data-tab="est">Datos</button><button data-tab="ali">Equipos</button></div>
       <div class="mv-panel"></div></div>`;
@@ -1169,6 +1219,7 @@
       if (b.dataset.o === 'hd' && r3) { r3.setHD(!r3.hd); el.ctrl.innerHTML = ctrlHTML(); }
       const a = b.dataset.act2;
       if (a === 'applytac' && MG) { const g = k => draft[k] ?? root.querySelector(`[data-g="${k}"]`).value; pendT = Date.now(); pendMin = Math.min(93, minuteAt(r) + 1); const mm = Math.min(93, minuteAt(r) + 1); MG.onOrder({ k: 'tac', tac: { ment: g('ment'), press: g('press'), est: g('est') }, m: mm }); const f = g('form'); let fNow = m.fm[MG.side]; for (const e of m.ev) if (e.t === 'tac' && e.s === MG.side && e.form && e.m <= minuteAt(r)) fNow = e.form; if (f !== fNow) MG.onOrder({ k: 'form', form: f, m: mm }); lastPanel = -1; }
+      if (a === 'tacs' && MG && MG.openPanel) { if (r >= LIVE_S - 2) return; MG.openPanel(tacInfo()); return; }
       if (a === 'dosub' && MG) { const out = draft.out ?? root.querySelector('[data-g="out"]').value, inn = draft.in ?? root.querySelector('[data-g="in"]').value; if (out && inn) MG.onOrder({ k: 'sub', out, in: inn, m: Math.min(93, minuteAt(r) + 1) }); delete draft.out; delete draft.in; lastPanel = -1; }
       if (a === 'full') { const el2 = root.closest('.mvov') || root; try { (el2.requestFullscreen ? el2.requestFullscreen() : Promise.reject()).then(() => { try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch (e) {} }).catch(() => {}); } catch (e) {} }
       if (a === 'fromstart') { mode = 'replay'; r = 0; speed = 4; snap = true; el.ctrl.innerHTML = ctrlHTML(); }
@@ -1209,6 +1260,14 @@
       if (b.type === 'goal') el.ban.style.setProperty('--tc', team.colors[0]);
       el.ban.innerHTML = html;
     }
+    function tacInfo() {
+      const s2 = MG.side, mnow = minuteAt(r), evNow = m.ev.filter(e => e.s === s2 && e.m <= mnow);
+      const rt = id => m.rat[id] && mnow > 30 ? (m.rat[id] >= 7 ? ' ⬆' : m.rat[id] < 6 ? ' ⬇' : '') : '';
+      const on = tl.side[s2].filter(p => p.from <= r && r < p.to).map(p => ({ id: p.id, pos: p.pos, x: Math.round(p.w * 100), y: Math.round(100 - p.d * 100), min0: p.from < 0 ? 0 : minuteAt(p.from), inj: evNow.some(e => e.t === 'les' && e.p === p.id), ama: evNow.some(e => e.t === 'ama' && e.p === p.id), arrow: rt(p.id) }));
+      const entered = new Set(tl.side[s2].filter(p => p.from <= r).map(p => p.id)), bench = (MG.bench || []).filter(id => !entered.has(id));
+      let tac = m.tc[s2], form = m.fm[s2]; for (const e of m.ev) if (e.t === 'tac' && e.s === s2 && e.m <= mnow) { if (e.tac) tac = e.tac; if (e.form) form = e.form; }
+      return { side: s2, mnow, next: Math.min(93, mnow + 1), at: o.live ? o.live.at : Date.now(), on, bench, used: evNow.filter(e => e.t === 'cam').length, tac: { ment: tac.ment, press: tac.press, est: tac.est }, form };
+    }
     function panel(smp) {
       const sec = Math.floor(smp.r / 2); if (sec === lastPanel) return; lastPanel = sec;
       const nm = id => esc(E.player(id).name);
@@ -1225,6 +1284,7 @@
         const tv = k => draft[k] ?? tacNow[k], fv = draft.form ?? formNow;
         const opt = (obj, v) => Object.entries(obj).map(([k, l]) => `<option value="${k}" ${k === v ? 'selected' : ''}>${l}</option>`).join('');
         const rt = id => m.rat[id] && mnow > 30 ? ` · ${m.rat[id] >= 7 ? '⬆' : m.rat[id] < 6 ? '⬇' : '='}` : '';
+        if (MG.openPanel) { el.panel.innerHTML = over ? '<p class="mv-note">El partido ha terminado.</p>' : `<div class="mv-ges"><p class="mv-note">Cambios hechos: ${used}/5 · ${MENT_L[tacNow.ment] || ''} · presión ${(PRESS_L[tacNow.press] || '').toLowerCase()} · ${formNow}</p><button class="mv-b on mv-big" data-act2="tacs">Abrir tácticas y cambios</button></div>`; return; }
         el.panel.innerHTML = over ? '<p class="mv-note">El partido ha terminado.</p>' : `<div class="mv-ges">
           <p class="mv-note">${pendT ? `✅ Táctica enviada: entra en juego en el minuto ${pendMin}.` : `Lo que cambies se aplica desde el minuto ${Math.min(93, mnow + 1)}.`} Cambios hechos: ${used}/5.</p>
           <div class="mv-grid"><label>Mentalidad<select data-g="ment">${opt({ def: 'Defensiva', equ: 'Equilibrada', ofe: 'Ofensiva' }, tv('ment'))}</select></label>
